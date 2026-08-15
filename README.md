@@ -51,6 +51,10 @@ watching, it just stops producing output, and the window says so. The quality
 field greys out when JPG is off, since it means nothing for PNG. Changes apply
 as you make them; **Done** just closes the window.
 
+Only one settings window opens at a time: launching the app while it is already
+open brings the existing window forward rather than starting a second one that
+would be editing the same config.
+
 The window is built with AppKit via JavaScript for Automation, so it needs no
 compiled binary and no extra signing. On a machine where it can't start,
 `setup` falls back to sequential prompts automatically; `setup --dialogs`

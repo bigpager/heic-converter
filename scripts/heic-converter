@@ -181,6 +181,28 @@ require_gui() {
 # backslashes have to be neutralised.
 as_escape() { print -r -- "$1" | /usr/bin/sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
+SETTINGS_PIDFILE="$APP_SUPPORT/settings.pid"
+
+# Echo the PID of a running settings window, or fail if there isn't one.
+settings_window_pid() {
+  [[ -f "$SETTINGS_PIDFILE" ]] || return 1
+  local pid
+  pid="$(/bin/cat "$SETTINGS_PIDFILE" 2>/dev/null)"
+  [[ "$pid" == <-> ]] || return 1
+  # Check the command line, not just that the PID is alive: PIDs get recycled,
+  # and a stale file left by a killed window would otherwise match some
+  # unrelated process and suppress the real one from ever opening.
+  /bin/ps -p "$pid" -o command= 2>/dev/null | /usr/bin/grep -q 'settings-ui\.js' \
+    || return 1
+  print -r -- "$pid"
+}
+
+raise_settings_window() {
+  /usr/bin/osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $1) to true" \
+    >/dev/null 2>&1 \
+    || print -r -- "Settings window is already open." >&2
+}
+
 ask_format() {
   /usr/bin/osascript 2>/dev/null <<'AS'
 tell application "System Events"
@@ -257,10 +279,26 @@ cmd_setup() {
 
   [[ -f "$SETTINGS_UI" ]] || { cmd_setup_dialogs; return $?; }
 
+  # One window at a time. Both the Applications app and this command funnel
+  # through here, so installing (which opens the window) and then opening the
+  # app would otherwise leave two independent windows editing the same config.
+  local existing
+  if existing="$(settings_window_pid)"; then
+    raise_settings_window "$existing"
+    return 0
+  fi
+
   # The settings window drives AppKit through JXA's ObjC bridge. If that fails
   # on some macOS revision, fall back to the plain dialog chain rather than
   # leaving the user with no way to change settings.
-  if ! /usr/bin/osascript -l JavaScript "$SETTINGS_UI" "$SELF"; then
+  /usr/bin/osascript -l JavaScript "$SETTINGS_UI" "$SELF" &
+  local ui_pid=$!
+  print -r -- "$ui_pid" > "$SETTINGS_PIDFILE"
+  wait "$ui_pid"
+  local rc=$?
+  /bin/rm -f "$SETTINGS_PIDFILE"
+
+  if (( rc != 0 )); then
     print -r -- "Settings window failed to open; falling back to dialogs." >&2
     cmd_setup_dialogs
     return $?
