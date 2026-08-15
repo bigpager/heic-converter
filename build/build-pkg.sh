@@ -141,9 +141,21 @@ fi
 # --ownership recommended installs everything root:wheel regardless of who built
 # it, so the payload isn't owned by the build machine's user.
 step "Building component package"
+
+# pkgbuild treats any .app it finds in the payload as a *relocatable* bundle by
+# default. That means the Installer looks up the bundle identifier on the target
+# Mac and, if it finds an existing copy anywhere — a stale one in ~/Downloads,
+# say — installs over that instead of /Applications. Pin it to the path we
+# actually chose.
+/usr/bin/pkgbuild --analyze --root "$WORK/payload" "$WORK/component.plist" >/dev/null
+/usr/bin/plutil -replace 0.BundleIsRelocatable -bool NO "$WORK/component.plist" \
+  || die "expected pkgbuild to detect HEIC Converter.app as a bundle component;
+       it did not, so the relocatable flag could not be cleared."
+
 /usr/bin/pkgbuild \
   --root "$WORK/payload" \
   --scripts "$WORK/scripts" \
+  --component-plist "$WORK/component.plist" \
   --identifier "$PKG_ID" \
   --version "$VERSION" \
   --install-location / \
