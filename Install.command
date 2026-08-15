@@ -14,23 +14,12 @@ echo "  HEIC Converter — Installer (source checkout)"
 echo "═══════════════════════════════════════════════════"
 echo
 
-CHOICE=$(osascript -e 'tell application "System Events"
-  activate
-  set theChoice to button returned of (display dialog "Convert HEIC files in Downloads to:" buttons {"PNG", "JPG", "Both"} default button "Both" with title "HEIC Converter")
-end tell
-return theChoice')
+chmod +x scripts/heic-converter scripts/*.sh packaging/setup-agent.sh 2>/dev/null
 
-case "$CHOICE" in
-  "PNG")  FORMAT="png" ;;
-  "JPG")  FORMAT="jpg" ;;
-  "Both") FORMAT="both" ;;
-  *) echo "Cancelled."; exit 0 ;;
-esac
-
-echo "Selected format: $FORMAT"
-echo
-
-./scripts/install.sh --format "$FORMAT"
+# Create the agent first so a config exists, then let setup drive the dialogs
+# for format, JPEG quality, and which folder to watch.
+./scripts/heic-converter install-agent || exit 1
+./scripts/heic-converter setup || exit 1
 
 echo
 echo "═══════════════════════════════════════════════════"
@@ -49,9 +38,9 @@ echo
 read "?Press Return once you've done that... "
 
 echo
-echo "✅ All set. Drop a .heic file into Downloads to test it."
+echo "✅ All set. Drop a .heic file into the watched folder to test it."
 echo
-echo "   Change format later:  ./scripts/heic-converter format png"
-echo "   Troubleshoot:         ./scripts/heic-converter doctor"
+echo "   Change settings later:  ./scripts/heic-converter setup"
+echo "   Troubleshoot:           ./scripts/heic-converter doctor"
 echo
 read "?Press Return to close this window... "

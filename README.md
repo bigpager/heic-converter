@@ -25,22 +25,46 @@ interpreter macOS sees running the watcher. It is the finest granularity this
 mechanism offers, and it is the one step Apple deliberately does not let an
 installer automate.
 
-## Usage
+## Settings
 
-The `.pkg` installs a `heic-converter` command:
+Defaults are **both** formats, **90%** JPEG quality, watching **`~/Downloads`**.
+
+For a native picker covering all three:
 
 ```bash
-heic-converter format both      # png | jpg | both — applies immediately
-heic-converter quality 90       # JPEG quality
+heic-converter setup
+```
+
+That asks for the format, then JPEG quality — only when JPG or Both is chosen,
+since it's meaningless for PNG — then opens a folder browser to pick what to
+watch. Your current values are preselected in each dialog, and cancelling any
+step leaves that setting alone.
+
+Or set them individually:
+
+```bash
+heic-converter format both              # png | jpg | both
+heic-converter quality 90               # 0-100
+heic-converter watch-folder ~/Pictures  # rebuilds the agent
+```
+
+Format and quality take effect on the next converted file — `heic-watch.sh`
+re-reads its config on every run, so there is no reinstall and no logout. The
+watch folder is different: launchd bakes it into the agent's `WatchPaths`, so
+changing it regenerates and reloads the agent. `watch-folder` and `setup` do
+that for you; if you hand-edit `WATCH_DIR` in `config.conf`, run
+`heic-converter install-agent` afterwards. `heic-converter doctor` reports it
+if the two ever disagree.
+
+## Other commands
+
+```bash
 heic-converter status           # agent, config, watch folder
 heic-converter doctor           # diagnose "it isn't converting"
-heic-converter run              # convert everything in Downloads now
+heic-converter run              # convert everything in the folder now
 heic-converter logs             # follow the conversion log
 heic-converter uninstall        # remove everything
 ```
-
-Format changes take effect on the next converted file. `heic-watch.sh` re-reads
-its config on every run, so there is no reinstall and no logout.
 
 ## Layout
 
@@ -149,7 +173,9 @@ grant for `/bin/zsh` — remove that in System Settings if you want it gone.
   versions — some want `low`/`normal`/`high`/`best`, others `0-100`. If JPG
   conversion starts failing after an OS update, check
   `~/Library/Logs/heic-converter.log` first.
-- The `.pkg` can't show the format picker the `.command` dialog offered;
-  Installer has no equivalent, and an `osascript` prompt in a `postinstall`
-  turns a dismissed dialog into a failed install. The format defaults to `both`
-  and `heic-converter format` changes it in one command, without reinstalling.
+- The `.pkg` can't host the settings UI. Installer's Customize pane only does
+  fixed checkboxes declared in `distribution.xml` — there is no folder-browse
+  widget, and a real one would need a compiled Installer plugin. An `osascript`
+  prompt in a `postinstall` isn't an option either, since a dismissed dialog
+  would fail the install. So the dialogs live in `heic-converter setup`, which
+  the installer's final screen points at and `Install.command` calls directly.

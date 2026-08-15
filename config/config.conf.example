@@ -11,9 +11,14 @@
 FORMAT="both"       # png | jpg | both
 JPG_QUALITY="90"    # 0-100 (sips formatOptions; accepted range varies by macOS version)
 
-# Folder to watch. Unlike the settings above, changing this needs the launchd
-# agent rebuilt, because the folder is baked into the agent's WatchPaths entry:
+# Folder to watch; defaults to ~/Downloads when unset. Unlike the settings
+# above, changing this needs the launchd agent rebuilt, because the folder is
+# baked into the agent's WatchPaths entry. The CLI handles that for you:
 #
-#   heic-converter install-agent
+#   heic-converter watch-folder ~/Pictures/Incoming
+#
+# If you edit it here by hand, run `heic-converter install-agent` afterwards.
+# `heic-converter doctor` warns when this and the loaded agent disagree.
+# Accepts an absolute path, or one starting with ~ or $HOME.
 #
 # WATCH_DIR="$HOME/Downloads"

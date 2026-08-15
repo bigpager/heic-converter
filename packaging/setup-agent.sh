@@ -3,13 +3,16 @@
 #
 # Wires up the per-user half of the install: the config file and the launchd
 # WatchPaths agent. The .pkg payload is system-wide (/usr/local/...), but the
-# watcher has to run *as the logged-in user* — it reads that user's ~/Downloads
+# watcher has to run *as the logged-in user* — it reads that user's watch folder
 # and writes converted images next to the originals. So the agent can't live in
 # the payload; it has to be materialised per user, which is what this does.
 #
-# Called two ways:
+# Called three ways:
 #   - from the .pkg postinstall, as root, with the console user as $1
-#   - by hand via `heic-converter install-agent`, as the user, with no argument
+#   - by `heic-converter install-agent`, as the user, with no argument
+#   - by `heic-converter setup` / `watch-folder`, to rebuild after the watched
+#     folder changes — WatchPaths is baked into the plist, so a new folder means
+#     a regenerated agent, not just a config edit
 #
 # Also migrates anyone off the older per-user install (the com.$USER.heicconverter
 # agent that scripts/install.sh used to create), so a machine that had the old
@@ -20,6 +23,11 @@ set -u
 LABEL="is.bfc.heic-converter"
 LIB_DIR="/usr/local/lib/heic-converter"
 WATCHER="$LIB_DIR/heic-watch.sh"
+
+# In a source checkout the watcher lives in scripts/ rather than /usr/local.
+if [[ ! -x "$WATCHER" && -x "${0:A:h:h}/scripts/heic-watch.sh" ]]; then
+  WATCHER="${0:A:h:h}/scripts/heic-watch.sh"
+fi
 
 log() { print -r -- "[heic-converter] $*"; }
 die() { print -r -- "[heic-converter] error: $*" >&2; exit 1; }
@@ -46,7 +54,6 @@ CONFIG_FILE="$APP_SUPPORT/config.conf"
 LOG_DIR="$TARGET_HOME/Library/Logs"
 LAUNCH_AGENTS="$TARGET_HOME/Library/LaunchAgents"
 PLIST="$LAUNCH_AGENTS/${LABEL}.plist"
-WATCH_DIR="$TARGET_HOME/Downloads"
 
 # Escape the handful of characters that would otherwise break the plist. Home
 # directory paths are usually boring, but "Ben & Jerry" is a legal macOS
@@ -55,30 +62,67 @@ xml_escape() {
   print -r -- "$1" | /usr/bin/sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
-/bin/mkdir -p "$APP_SUPPORT" "$LOG_DIR" "$LAUNCH_AGENTS" "$WATCH_DIR"
+# Read one key *without sourcing* the file. This script runs as root from the
+# .pkg postinstall while config.conf is writable by the user, so sourcing it
+# would hand any local user a root shell.
+read_config_value() {
+  local value
+  [[ -f "$CONFIG_FILE" ]] || return 1
+  # Quoted form first, so a '#' inside a folder name isn't taken as a comment.
+  value="$(/usr/bin/sed -n -E "s/^[[:space:]]*$1=\"([^\"]*)\".*/\1/p" "$CONFIG_FILE" | /usr/bin/tail -n 1)"
+  if [[ -z "$value" ]]; then
+    value="$(/usr/bin/sed -n -E "s/^[[:space:]]*$1=([^[:space:]#]*).*/\1/p" "$CONFIG_FILE" | /usr/bin/tail -n 1)"
+  fi
+  print -r -- "$value"
+}
+
+# A hand-edited config may well say $HOME or ~; the picker writes absolute paths.
+expand_home() {
+  case "$1" in
+    '$HOME'/*) print -r -- "${TARGET_HOME}/${1#\$HOME/}" ;;
+    '~'/*)     print -r -- "${TARGET_HOME}/${1#\~/}" ;;
+    '$HOME'|'~') print -r -- "$TARGET_HOME" ;;
+    *)         print -r -- "$1" ;;
+  esac
+}
+
+/bin/mkdir -p "$APP_SUPPORT" "$LOG_DIR" "$LAUNCH_AGENTS"
 
 # --- Config -----------------------------------------------------------------
 # Never clobber an existing config: on upgrade, or on a reinstall over the old
-# .command-based install, the user's chosen format has to survive.
+# .command-based install, the user's chosen settings have to survive.
 if [[ -f "$CONFIG_FILE" ]]; then
   log "keeping existing config at $CONFIG_FILE"
 else
   /bin/cat > "$CONFIG_FILE" <<'CONF'
 # heic-converter config
 #
-# heic-watch.sh re-reads this file on every run, so changes take effect on the
-# next file dropped into the watched folder — no reinstall, no logout.
-# Easiest way to change it:  heic-converter format both
+# FORMAT and JPG_QUALITY are re-read by heic-watch.sh on every run, so changes
+# take effect on the next file dropped in — no reinstall, no logout:
+#
+#   heic-converter format both
+#   heic-converter quality 90
+#
+# WATCH_DIR is different: launchd bakes the watched folder into the agent, so
+# changing it has to regenerate the agent. Use the CLI rather than editing it
+# here, and it will handle that for you:
+#
+#   heic-converter watch-folder ~/Pictures/Incoming
+#
+# Or run `heic-converter setup` for all three with a native picker.
 
 FORMAT="both"        # png | jpg | both
 JPG_QUALITY="90"     # 0-100 (passed to sips formatOptions)
-
-# Folder to watch. Changing this needs the agent rebuilt so launchd picks up the
-# new WatchPaths entry:  heic-converter install-agent
-# WATCH_DIR="$HOME/Downloads"
 CONF
   log "wrote default config to $CONFIG_FILE"
 fi
+
+# --- Which folder to watch ---------------------------------------------------
+WATCH_DIR="$(expand_home "$(read_config_value WATCH_DIR)")"
+if [[ -z "$WATCH_DIR" ]]; then
+  WATCH_DIR="$TARGET_HOME/Downloads"
+fi
+/bin/mkdir -p "$WATCH_DIR"
 
 # --- Retire the legacy per-user agent ---------------------------------------
 LEGACY_LABEL="com.${TARGET_USER}.heicconverter"

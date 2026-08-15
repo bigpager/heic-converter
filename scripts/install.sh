@@ -1,9 +1,9 @@
 #!/bin/zsh
 # install.sh — install straight from a repo checkout, for the dev loop.
 #
-# This is the fast path for iterating: it points the launchd agent at the
-# heic-watch.sh *in this checkout*, so edits take effect on the next dropped
-# file with no reinstall step.
+# This is the fast path for iterating: the agent points at the heic-watch.sh
+# *in this checkout*, so edits take effect on the next dropped file with no
+# reinstall step.
 #
 # For distribution, build the signed .pkg instead:
 #   make pkg && make notarize
@@ -17,13 +17,9 @@
 set -e
 
 SCRIPT_DIR="${0:A:h}"
-LABEL="is.bfc.heic-converter"
-APP_SUPPORT="$HOME/Library/Application Support/heic-converter"
-CONFIG_FILE="$APP_SUPPORT/config.conf"
-LOG_DIR="$HOME/Library/Logs"
-PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
-WATCH_DIR="$HOME/Downloads"
-WATCHER="$SCRIPT_DIR/heic-watch.sh"
+PROJECT_DIR="${SCRIPT_DIR:h}"
+SETUP_AGENT="$PROJECT_DIR/packaging/setup-agent.sh"
+CLI="$SCRIPT_DIR/heic-converter"
 
 FORMAT=""
 while [[ $# -gt 0 ]]; do
@@ -53,68 +49,18 @@ if [[ "$FORMAT" != "png" && "$FORMAT" != "jpg" && "$FORMAT" != "both" ]]; then
 fi
 
 echo "==> Installing HEIC converter (dev mode) for $(whoami)"
-echo "    Format:   $FORMAT"
-echo "    Watching: $WATCH_DIR"
-echo "    Watcher:  $WATCHER"
 echo
 
-mkdir -p "$APP_SUPPORT" "$LOG_DIR" "$HOME/Library/LaunchAgents"
-chmod +x "$WATCHER"
+chmod +x "$SCRIPT_DIR/heic-watch.sh" "$CLI" "$SETUP_AGENT"
 
-# --- Config ---
-cat > "$CONFIG_FILE" << CONF_EOF
-# heic-converter config — the watcher re-reads this on every run, so changes
-# take effect on the next converted file. No reinstall needed.
-FORMAT="$FORMAT"
-JPG_QUALITY="90"
-CONF_EOF
+# setup-agent.sh owns config creation, the plist, the legacy migration, and
+# loading the agent — the same code the .pkg runs. Duplicating it here is how
+# the two paths would drift.
+"$SETUP_AGENT"
 
-# --- Retire the pre-1.0 per-user agent, if this machine has one ---
-LEGACY_LABEL="com.$(whoami).heicconverter"
-LEGACY_PLIST="$HOME/Library/LaunchAgents/${LEGACY_LABEL}.plist"
-if [[ -f "$LEGACY_PLIST" ]]; then
-  echo "==> Removing legacy agent $LEGACY_LABEL"
-  launchctl bootout "gui/$(id -u)/${LEGACY_LABEL}" 2>/dev/null || true
-  rm -f "$LEGACY_PLIST" "$HOME/bin/heic-watch.sh"
-fi
+# Set the format afterwards, so an existing config (and any custom watch folder)
+# survives rather than being overwritten.
+"$CLI" format "$FORMAT"
 
-# --- launchd plist ---
-cat > "$PLIST_PATH" << PLIST_EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/zsh</string>
-        <string>${WATCHER}</string>
-    </array>
-    <key>WatchPaths</key>
-    <array>
-        <string>${WATCH_DIR}</string>
-    </array>
-    <key>StandardOutPath</key>
-    <string>${LOG_DIR}/heic-converter.out.log</string>
-    <key>StandardErrorPath</key>
-    <string>${LOG_DIR}/heic-converter.err.log</string>
-    <key>ThrottleInterval</key>
-    <integer>2</integer>
-</dict>
-</plist>
-PLIST_EOF
-
-plutil -lint "$PLIST_PATH" > /dev/null
-
-launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
-
-echo "==> Installed. Agent status:"
-launchctl print "gui/$(id -u)/${LABEL}" > /dev/null 2>&1 \
-  && echo "    loaded" \
-  || echo "    (not loaded yet — may need a moment)"
 echo
-echo "==> Config file (edit anytime, no reinstall needed):"
-echo "    $CONFIG_FILE"
+"$CLI" status

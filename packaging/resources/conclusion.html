@@ -27,12 +27,26 @@ the finest granularity this mechanism allows.</p>
 <p><strong>Then try it:</strong> drop a <code>.heic</code> file into Downloads.
 A converted copy should appear within a couple of seconds.</p>
 
+<p><strong>Choosing settings</strong></p>
+
+<p>Out of the box this converts to <strong>both</strong> PNG and JPG at
+<strong>90%</strong> quality, watching your <strong>Downloads</strong> folder. To
+change any of that with a native picker, run:</p>
+
+<p><code>heic-converter setup</code></p>
+
+<p>It asks for the output format, then JPEG quality (only if you picked JPG or
+Both), then lets you browse to a different folder to watch.</p>
+
 <p><strong>Useful commands</strong></p>
 <ul>
+  <li><code>heic-converter setup</code> &mdash; format, quality, and watch folder</li>
   <li><code>heic-converter format both</code> &mdash; switch between png, jpg, or both
       (takes effect immediately, no reinstall)</li>
+  <li><code>heic-converter quality 90</code> &mdash; JPEG quality, 0&ndash;100</li>
+  <li><code>heic-converter watch-folder ~/Pictures</code> &mdash; watch somewhere else</li>
   <li><code>heic-converter doctor</code> &mdash; diagnose it if nothing is converting</li>
-  <li><code>heic-converter run</code> &mdash; convert everything already in Downloads</li>
+  <li><code>heic-converter run</code> &mdash; convert everything already in the folder</li>
   <li><code>heic-converter uninstall</code> &mdash; remove it completely</li>
 </ul>
 

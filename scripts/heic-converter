@@ -2,11 +2,11 @@
 # heic-converter — control the HEIC watch-folder agent.
 #
 # The .command installer used a dialog to pick an output format at install time.
-# A .pkg can't show one (Installer offers no equivalent, and putting an osascript
-# prompt in a postinstall means a failed dialog fails the install), so the format
-# lives here instead: `heic-converter format both`. Since heic-watch.sh re-reads
-# its config on every run, that takes effect immediately — which is strictly more
-# useful than a one-shot prompt you'd have to reinstall to revisit.
+# A .pkg can't show one — Installer offers no equivalent, and an osascript prompt
+# in a postinstall turns a dismissed dialog into a failed install — so the
+# settings live here instead. `heic-converter setup` presents the same native
+# dialogs (format, JPEG quality, watch folder) any time, and each is also
+# settable individually for scripting.
 
 set -u
 
@@ -23,6 +23,16 @@ else
   LIB_DIR="/usr/local/lib/heic-converter"
 fi
 
+# setup-agent.sh sits beside the watcher once installed, but in a checkout it
+# lives in packaging/ rather than scripts/.
+if [[ -x "$LIB_DIR/setup-agent.sh" ]]; then
+  SETUP_AGENT="$LIB_DIR/setup-agent.sh"
+elif [[ -x "${SELF_DIR:h}/packaging/setup-agent.sh" ]]; then
+  SETUP_AGENT="${SELF_DIR:h}/packaging/setup-agent.sh"
+else
+  SETUP_AGENT="$LIB_DIR/setup-agent.sh"
+fi
+
 APP_SUPPORT="$HOME/Library/Application Support/heic-converter"
 CONFIG_FILE="$APP_SUPPORT/config.conf"
 LOG_FILE="$HOME/Library/Logs/heic-converter.log"
@@ -34,26 +44,71 @@ die() { print -r -- "error: $*" >&2; exit 1; }
 read_config_value() {
   # Read one key without sourcing the file, so `heic-converter status` can't be
   # made to execute whatever ended up in config.conf.
-  local key="$1"
+  local key="$1" value
   [[ -f "$CONFIG_FILE" ]] || return 1
-  /usr/bin/sed -n -E "s/^[[:space:]]*${key}=\"?([^\"#]*)\"?.*/\1/p" "$CONFIG_FILE" \
-    | /usr/bin/tail -n 1 | /usr/bin/sed -e 's/[[:space:]]*$//'
+  # Quoted form first — everything we write is quoted, and it keeps a '#' inside
+  # a folder name from being mistaken for a trailing comment.
+  value="$(/usr/bin/sed -n -E "s/^[[:space:]]*${key}=\"([^\"]*)\".*/\1/p" "$CONFIG_FILE" | /usr/bin/tail -n 1)"
+  if [[ -z "$value" ]]; then
+    value="$(/usr/bin/sed -n -E "s/^[[:space:]]*${key}=([^[:space:]#]*).*/\1/p" "$CONFIG_FILE" | /usr/bin/tail -n 1)"
+  fi
+  print -r -- "$value"
 }
 
 set_config_value() {
+  # Rewritten line by line rather than with sed: in a sed replacement '&' means
+  # "the whole match", so a folder like ~/Ben & Jerry would corrupt the config.
   local key="$1" value="$2"
   [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE — run: heic-converter install-agent"
-  local tmp
+  local tmp line stripped replaced=0
   tmp="$(/usr/bin/mktemp)" || die "could not create a temp file"
-  if /usr/bin/grep -qE "^[[:space:]]*${key}=" "$CONFIG_FILE"; then
-    /usr/bin/sed -E "s|^[[:space:]]*${key}=.*|${key}=\"${value}\"|" "$CONFIG_FILE" > "$tmp"
-  else
-    /bin/cat "$CONFIG_FILE" > "$tmp"
-    print -r -- "${key}=\"${value}\"" >> "$tmp"
-  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    stripped="${line#"${line%%[![:space:]]*}"}"
+    if [[ "$stripped" == "${key}="* ]]; then
+      (( replaced )) || print -r -- "${key}=\"${value}\"" >> "$tmp"
+      replaced=1
+    else
+      print -r -- "$line" >> "$tmp"
+    fi
+  done < "$CONFIG_FILE"
+  (( replaced )) || print -r -- "${key}=\"${value}\"" >> "$tmp"
   /bin/cat "$tmp" > "$CONFIG_FILE"
   /bin/rm -f "$tmp"
 }
+
+expand_home() {
+  case "$1" in
+    '$HOME'/*)   print -r -- "${HOME}/${1#\$HOME/}" ;;
+    '~'/*)       print -r -- "${HOME}/${1#\~/}" ;;
+    '$HOME'|'~') print -r -- "$HOME" ;;
+    *)           print -r -- "$1" ;;
+  esac
+}
+
+watch_dir() {
+  local configured
+  configured="$(read_config_value WATCH_DIR)"
+  if [[ -n "$configured" ]]; then
+    expand_home "$configured"
+  else
+    print -r -- "$HOME/Downloads"
+  fi
+}
+
+# launchd bakes WatchPaths into the plist, so a new folder needs the agent
+# regenerated rather than just a config edit.
+rebuild_agent() {
+  [[ -x "$SETUP_AGENT" ]] || die "setup-agent.sh not found (looked in $LIB_DIR)"
+  /bin/zsh "$SETUP_AGENT"
+}
+
+require_config() {
+  [[ -f "$CONFIG_FILE" ]] && return 0
+  print -r -- "No config yet — setting up the agent first."
+  rebuild_agent
+}
+
+cmd_install_agent() { rebuild_agent; }
 
 cmd_format() {
   local value="${1:-}"
@@ -81,6 +136,143 @@ cmd_quality() {
   print -r -- "jpg quality set to $value"
 }
 
+cmd_watch_folder() {
+  local value="${1:-}"
+  if [[ -z "$value" ]]; then
+    watch_dir
+    return 0
+  fi
+  value="$(expand_home "$value")"
+  value="${value%/}"
+  [[ -d "$value" ]] || die "not a directory: $value"
+  set_config_value WATCH_DIR "$value"
+  print -r -- "watch folder set to $value"
+  rebuild_agent
+}
+
+# --- Native dialogs ----------------------------------------------------------
+
+require_gui() {
+  [[ -x /usr/bin/osascript ]] \
+    || die "setup needs macOS dialogs; set values directly instead:
+  heic-converter format both
+  heic-converter quality 90
+  heic-converter watch-folder ~/Downloads"
+}
+
+# Folder paths are interpolated into AppleScript source, so quotes and
+# backslashes have to be neutralised.
+as_escape() { print -r -- "$1" | /usr/bin/sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+ask_format() {
+  /usr/bin/osascript 2>/dev/null <<'AS'
+tell application "System Events"
+  activate
+  set theChoice to button returned of (display dialog "Convert HEIC files to:" buttons {"PNG", "JPG", "Both"} default button "Both" with title "HEIC Converter")
+end tell
+return theChoice
+AS
+}
+
+ask_quality() {
+  local current="$1"
+  local -a tiers=(100 95 90 85 80 70 60)
+  local list_items="" default_item="" label t
+
+  # Keep a non-standard existing value selectable, rather than silently
+  # snapping someone's 72 back to 90.
+  if [[ -n "$current" && ${tiers[(Ie)$current]} -eq 0 && "$current" == <-> ]]; then
+    default_item="${current}% (current)"
+    list_items="\"$default_item\", "
+  fi
+
+  for t in $tiers; do
+    case $t in
+      100) label="100% — largest file" ;;
+      90)  label="90% — recommended" ;;
+      *)   label="${t}%" ;;
+    esac
+    list_items+="\"$label\", "
+    [[ "$t" == "$current" ]] && default_item="$label"
+  done
+  list_items="${list_items%, }"
+  [[ -z "$default_item" ]] && default_item="90% — recommended"
+
+  local picked
+  picked="$(/usr/bin/osascript 2>/dev/null <<AS
+set qualityOptions to {$list_items}
+tell application "System Events"
+  activate
+  set picked to choose from list qualityOptions with title "HEIC Converter" with prompt "JPEG quality:" default items {"$(as_escape "$default_item")"} OK button name "Continue"
+end tell
+if picked is false then return ""
+return item 1 of picked
+AS
+)"
+  # "90% — recommended" -> 90
+  print -r -- "$picked" | /usr/bin/sed -n -E 's/^([0-9]+)%.*/\1/p'
+}
+
+ask_folder() {
+  local current="$1"
+  [[ -d "$current" ]] || current="$HOME"
+  local picked
+  picked="$(/usr/bin/osascript 2>/dev/null <<AS
+set defaultLoc to POSIX file "$(as_escape "$current")"
+tell application "System Events"
+  activate
+  set theFolder to choose folder with prompt "Watch which folder for new HEIC images?" default location defaultLoc
+end tell
+return POSIX path of theFolder
+AS
+)"
+  print -r -- "${picked%/}"
+}
+
+cmd_setup() {
+  require_gui
+  require_config
+
+  local fmt quality folder
+
+  case "$(ask_format)" in
+    PNG)  fmt="png" ;;
+    JPG)  fmt="jpg" ;;
+    Both) fmt="both" ;;
+    *) print -r -- "Cancelled."; return 0 ;;
+  esac
+  set_config_value FORMAT "$fmt"
+
+  # Quality only matters when JPEGs are actually being produced.
+  if [[ "$fmt" == "jpg" || "$fmt" == "both" ]]; then
+    quality="$(ask_quality "$(read_config_value JPG_QUALITY)")"
+    if [[ -n "$quality" ]]; then
+      set_config_value JPG_QUALITY "$quality"
+    else
+      print -r -- "Quality unchanged ($(read_config_value JPG_QUALITY))."
+    fi
+  fi
+
+  folder="$(ask_folder "$(watch_dir)")"
+  if [[ -n "$folder" && -d "$folder" ]]; then
+    set_config_value WATCH_DIR "$folder"
+  else
+    print -r -- "Watch folder unchanged ($(watch_dir))."
+  fi
+
+  # Always rebuild: the folder may have changed, and it is cheap and idempotent.
+  rebuild_agent
+
+  print -r -- ""
+  print -r -- "Settings:"
+  print -r -- "  format:   $(read_config_value FORMAT)"
+  [[ "$(read_config_value FORMAT)" != "png" ]] \
+    && print -r -- "  quality:  $(read_config_value JPG_QUALITY)"
+  print -r -- "  watching: $(watch_dir)"
+}
+
+# --- Status and diagnostics --------------------------------------------------
+
 agent_loaded() {
   /bin/launchctl print "gui/$(/usr/bin/id -u)/${LABEL}" >/dev/null 2>&1
 }
@@ -95,16 +287,6 @@ cmd_status() {
   print -r -- "  quality:  $(read_config_value JPG_QUALITY)"
   print -r -- "  watching: $(watch_dir)"
   print -r -- "  log:      $LOG_FILE"
-}
-
-watch_dir() {
-  local configured
-  configured="$(read_config_value WATCH_DIR)"
-  if [[ -n "$configured" ]]; then
-    print -r -- "${configured/#\$HOME/$HOME}"
-  else
-    print -r -- "$HOME/Downloads"
-  fi
 }
 
 cmd_doctor() {
@@ -142,6 +324,17 @@ cmd_doctor() {
     print -r -- "  [FAIL] launchd agent is not loaded — try: heic-converter install-agent"; (( problems++ ))
   fi
 
+  # A watch folder the plist disagrees with means the agent was never rebuilt
+  # after the config changed — exactly the failure the folder picker could cause.
+  # Compare against the escaped form: the plist stores "Ben &amp; Jerry", so a
+  # raw comparison would report drift forever for any path containing & < >.
+  local dir_escaped
+  dir_escaped="$(print -r -- "$dir" | /usr/bin/sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')"
+  if [[ -f "$PLIST" ]] && ! /usr/bin/grep -qF "<string>${dir_escaped}</string>" "$PLIST"; then
+    print -r -- "  [FAIL] agent is not watching $dir — run: heic-converter install-agent"
+    (( problems++ ))
+  fi
+
   if [[ -d "$dir" ]]; then
     if /bin/ls "$dir" >/dev/null 2>&1; then
       print -r -- "  [ok]   $dir is readable from this shell"
@@ -153,7 +346,7 @@ cmd_doctor() {
   fi
 
   # Full Disk Access is granted to the *interpreter*, so this shell being able to
-  # read Downloads says nothing about whether launchd's zsh can. The log is the
+  # read the folder says nothing about whether launchd's zsh can. The log is the
   # only honest signal, and only after something has actually been dropped in.
   if [[ -s "$ERR_LOG" ]]; then
     print -r -- ""
@@ -195,11 +388,6 @@ cmd_logs() {
   /usr/bin/tail -f "$LOG_FILE"
 }
 
-cmd_install_agent() {
-  [[ -x "$LIB_DIR/setup-agent.sh" ]] || die "setup-agent.sh not found in $LIB_DIR"
-  /bin/zsh "$LIB_DIR/setup-agent.sh"
-}
-
 cmd_uninstall() {
   local assume_yes=0
   [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]] && assume_yes=1
@@ -207,7 +395,7 @@ cmd_uninstall() {
   print -r -- "This will remove:"
   print -r -- "  - the launchd agent ($LABEL)"
   print -r -- "  - $PLIST"
-  print -r -- "  - $APP_SUPPORT (including your format setting)"
+  print -r -- "  - $APP_SUPPORT (including your settings)"
   print -r -- "  - /usr/local/lib/heic-converter and /usr/local/bin/heic-converter"
   print -r -- ""
   print -r -- "Already-converted images are left alone."
@@ -250,15 +438,23 @@ heic-converter — control the HEIC watch-folder agent
 
 Usage: heic-converter <command> [argument]
 
-Commands:
+Settings:
+  setup                   Native dialogs for format, JPEG quality, and which
+                          folder to watch.
   format [png|jpg|both]   Show or set the output format. Takes effect on the
                           next converted file — no reinstall needed.
-  quality [0-100]         Show or set JPEG quality.
+  quality [0-100]         Show or set JPEG quality (default 90).
+  watch-folder [path]     Show or set the watched folder (default ~/Downloads).
+                          Setting it rebuilds the agent.
+
+Diagnostics:
   status                  Show agent, config, and watch-folder state.
   doctor                  Diagnose a watcher that isn't converting.
   grant-access            Open the Full Disk Access pane in System Settings.
-  run                     Convert everything in the watch folder right now.
   logs                    Follow the conversion log.
+
+Other:
+  run                     Convert everything in the watch folder right now.
   install-agent           (Re)create and load the launchd agent for this user.
   uninstall [--yes]       Remove the agent, config, and installed files.
   version                 Print the installed version.
@@ -267,8 +463,10 @@ USAGE
 }
 
 case "${1:-help}" in
+  setup)          cmd_setup ;;
   format)         shift; cmd_format "${1:-}" ;;
   quality)        shift; cmd_quality "${1:-}" ;;
+  watch-folder)   shift; cmd_watch_folder "${1:-}" ;;
   status)         cmd_status ;;
   doctor)         cmd_doctor ;;
   grant-access)   cmd_grant_access ;;
