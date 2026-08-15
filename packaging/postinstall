@@ -1,0 +1,39 @@
+#!/bin/zsh
+# postinstall — runs as root, after the payload is in place.
+#
+# The payload itself is system-wide and inert. This step turns it into a running
+# watcher for the person who actually double-clicked the installer, by handing
+# off to setup-agent.sh (shared with `heic-converter install-agent`, so there is
+# exactly one implementation of the per-user wiring).
+#
+# Installer script arguments: $1 package path, $2 install location, $3 target
+# volume, $4 root of the system.
+
+set -u
+
+LIB_DIR="/usr/local/lib/heic-converter"
+TARGET_VOLUME="${3:-/}"
+
+log() { print -r -- "[heic-converter postinstall] $*"; }
+
+# The Installer allows targeting a non-boot volume. Dropping the files there is
+# meaningful; wiring launchd on the *running* system is not.
+if [[ "$TARGET_VOLUME" != "/" ]]; then
+  log "target volume is $TARGET_VOLUME, not /; skipping agent setup"
+  exit 0
+fi
+
+CONSOLE_USER="$(/usr/bin/stat -f%Su /dev/console 2>/dev/null)"
+if [[ -z "$CONSOLE_USER" || "$CONSOLE_USER" == "root" || "$CONSOLE_USER" == "loginwindow" ]]; then
+  log "no GUI user is logged in; files installed"
+  log "run 'heic-converter install-agent' once logged in to start the watcher"
+  exit 0
+fi
+
+# Never fail the install over the agent: the payload is what the receipt covers,
+# and install-agent can always finish the job afterwards.
+if ! /bin/zsh "$LIB_DIR/setup-agent.sh" "$CONSOLE_USER"; then
+  log "agent setup did not complete; run 'heic-converter install-agent' to retry"
+fi
+
+exit 0

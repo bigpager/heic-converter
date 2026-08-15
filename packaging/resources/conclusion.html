@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, system-ui, sans-serif; font-size: 13px; line-height: 1.5;">
+
+<p><strong>Almost done &mdash; one manual step remains.</strong></p>
+
+<p>macOS will not let a background task read your Downloads folder until you say so,
+and Apple provides no way for an installer to request this for you.</p>
+
+<p><strong>Grant Full Disk Access</strong></p>
+<ol>
+  <li>Open <strong>System Settings</strong> &rarr; <strong>Privacy &amp; Security</strong>
+      &rarr; <strong>Full Disk Access</strong></li>
+  <li>Click <strong>+</strong></li>
+  <li>Press <strong>Cmd&ndash;Shift&ndash;G</strong> and enter <code>/bin/zsh</code></li>
+  <li>Add it, then switch it <strong>on</strong></li>
+</ol>
+
+<p>Or just run <code>heic-converter grant-access</code> in Terminal, which opens that
+pane directly.</p>
+
+<p>The permission has to go to <code>/bin/zsh</code> rather than to this tool
+specifically, because that is the interpreter macOS sees running the watcher. That is
+the finest granularity this mechanism allows.</p>
+
+<p><strong>Then try it:</strong> drop a <code>.heic</code> file into Downloads.
+A converted copy should appear within a couple of seconds.</p>
+
+<p><strong>Useful commands</strong></p>
+<ul>
+  <li><code>heic-converter format both</code> &mdash; switch between png, jpg, or both
+      (takes effect immediately, no reinstall)</li>
+  <li><code>heic-converter doctor</code> &mdash; diagnose it if nothing is converting</li>
+  <li><code>heic-converter run</code> &mdash; convert everything already in Downloads</li>
+  <li><code>heic-converter uninstall</code> &mdash; remove it completely</li>
+</ul>
+
+</body>
+</html>

@@ -1,8 +1,19 @@
-# Copy of what install.sh writes to:
+# Copy of what the installer writes to:
 #   ~/Library/Application Support/heic-converter/config.conf
 #
 # Edit the live copy anytime — no reinstall or relaunch needed, the watcher
-# script reads this file fresh on every run.
+# script reads this file fresh on every run. Or use the CLI, which edits the
+# same file:
+#
+#   heic-converter format both
+#   heic-converter quality 90
 
 FORMAT="both"       # png | jpg | both
 JPG_QUALITY="90"    # 0-100 (sips formatOptions; accepted range varies by macOS version)
+
+# Folder to watch. Unlike the settings above, changing this needs the launchd
+# agent rebuilt, because the folder is baked into the agent's WatchPaths entry:
+#
+#   heic-converter install-agent
+#
+# WATCH_DIR="$HOME/Downloads"

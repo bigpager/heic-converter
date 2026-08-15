@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Distribution definition consumed by productbuild.
+
+  customize="never" — there is exactly one component and nothing meaningful to
+  opt out of, so the extra "Customize" pane would only add a step.
+
+  hostArchitectures — the payload is shell scripts, so it is architecture
+  independent; naming both keeps Installer from second-guessing that on Apple
+  silicon.
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>HEIC Converter</title>
+    <organization>is.bfc</organization>
+
+    <options customize="never" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="12.0"/>
+        </allowed-os-versions>
+    </volume-check>
+
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="LICENSE.txt" mime-type="text/plain"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+
+    <choices-outline>
+        <line choice="default">
+            <line choice="is.bfc.heic-converter"/>
+        </line>
+    </choices-outline>
+
+    <choice id="default"/>
+    <choice id="is.bfc.heic-converter" visible="false">
+        <pkg-ref id="is.bfc.heic-converter"/>
+    </choice>
+
+    <pkg-ref id="is.bfc.heic-converter" version="__VERSION__" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>

@@ -1,0 +1,282 @@
+#!/bin/zsh
+# heic-converter — control the HEIC watch-folder agent.
+#
+# The .command installer used a dialog to pick an output format at install time.
+# A .pkg can't show one (Installer offers no equivalent, and putting an osascript
+# prompt in a postinstall means a failed dialog fails the install), so the format
+# lives here instead: `heic-converter format both`. Since heic-watch.sh re-reads
+# its config on every run, that takes effect immediately — which is strictly more
+# useful than a one-shot prompt you'd have to reinstall to revisit.
+
+set -u
+
+LABEL="is.bfc.heic-converter"
+
+# Installed layout, with a fallback so the CLI also works straight from a repo
+# checkout during development.
+SELF_DIR="${0:A:h}"
+if [[ -x "/usr/local/lib/heic-converter/heic-watch.sh" ]]; then
+  LIB_DIR="/usr/local/lib/heic-converter"
+elif [[ -x "$SELF_DIR/heic-watch.sh" ]]; then
+  LIB_DIR="$SELF_DIR"
+else
+  LIB_DIR="/usr/local/lib/heic-converter"
+fi
+
+APP_SUPPORT="$HOME/Library/Application Support/heic-converter"
+CONFIG_FILE="$APP_SUPPORT/config.conf"
+LOG_FILE="$HOME/Library/Logs/heic-converter.log"
+ERR_LOG="$HOME/Library/Logs/heic-converter.err.log"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+
+die() { print -r -- "error: $*" >&2; exit 1; }
+
+read_config_value() {
+  # Read one key without sourcing the file, so `heic-converter status` can't be
+  # made to execute whatever ended up in config.conf.
+  local key="$1"
+  [[ -f "$CONFIG_FILE" ]] || return 1
+  /usr/bin/sed -n -E "s/^[[:space:]]*${key}=\"?([^\"#]*)\"?.*/\1/p" "$CONFIG_FILE" \
+    | /usr/bin/tail -n 1 | /usr/bin/sed -e 's/[[:space:]]*$//'
+}
+
+set_config_value() {
+  local key="$1" value="$2"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE — run: heic-converter install-agent"
+  local tmp
+  tmp="$(/usr/bin/mktemp)" || die "could not create a temp file"
+  if /usr/bin/grep -qE "^[[:space:]]*${key}=" "$CONFIG_FILE"; then
+    /usr/bin/sed -E "s|^[[:space:]]*${key}=.*|${key}=\"${value}\"|" "$CONFIG_FILE" > "$tmp"
+  else
+    /bin/cat "$CONFIG_FILE" > "$tmp"
+    print -r -- "${key}=\"${value}\"" >> "$tmp"
+  fi
+  /bin/cat "$tmp" > "$CONFIG_FILE"
+  /bin/rm -f "$tmp"
+}
+
+cmd_format() {
+  local value="${1:-}"
+  if [[ -z "$value" ]]; then
+    print -r -- "$(read_config_value FORMAT)"
+    return 0
+  fi
+  case "$value" in
+    png|jpg|both) ;;
+    *) die "invalid format: $value (expected png, jpg, or both)" ;;
+  esac
+  set_config_value FORMAT "$value"
+  print -r -- "format set to $value (applies to the next file converted)"
+}
+
+cmd_quality() {
+  local value="${1:-}"
+  if [[ -z "$value" ]]; then
+    print -r -- "$(read_config_value JPG_QUALITY)"
+    return 0
+  fi
+  [[ "$value" == <-> && "$value" -ge 0 && "$value" -le 100 ]] \
+    || die "invalid quality: $value (expected an integer 0-100)"
+  set_config_value JPG_QUALITY "$value"
+  print -r -- "jpg quality set to $value"
+}
+
+agent_loaded() {
+  /bin/launchctl print "gui/$(/usr/bin/id -u)/${LABEL}" >/dev/null 2>&1
+}
+
+cmd_status() {
+  print -r -- "heic-converter $(cmd_version)"
+  print -r -- ""
+  print -r -- "  agent:    $(agent_loaded && print -r -- "loaded" || print -r -- "not loaded")"
+  print -r -- "  plist:    ${PLIST}$([[ -f "$PLIST" ]] || print -r -- "  (missing)")"
+  print -r -- "  config:   ${CONFIG_FILE}$([[ -f "$CONFIG_FILE" ]] || print -r -- "  (missing)")"
+  print -r -- "  format:   $(read_config_value FORMAT)"
+  print -r -- "  quality:  $(read_config_value JPG_QUALITY)"
+  print -r -- "  watching: $(watch_dir)"
+  print -r -- "  log:      $LOG_FILE"
+}
+
+watch_dir() {
+  local configured
+  configured="$(read_config_value WATCH_DIR)"
+  if [[ -n "$configured" ]]; then
+    print -r -- "${configured/#\$HOME/$HOME}"
+  else
+    print -r -- "$HOME/Downloads"
+  fi
+}
+
+cmd_doctor() {
+  local problems=0
+  local dir; dir="$(watch_dir)"
+
+  print -r -- "Checking heic-converter..."
+  print -r -- ""
+
+  if [[ -x /usr/bin/sips ]]; then
+    print -r -- "  [ok]   sips is available"
+  else
+    print -r -- "  [FAIL] /usr/bin/sips is missing — conversion cannot work"; (( problems++ ))
+  fi
+
+  if [[ -x "$LIB_DIR/heic-watch.sh" ]]; then
+    print -r -- "  [ok]   watcher installed at $LIB_DIR/heic-watch.sh"
+  else
+    print -r -- "  [FAIL] watcher not found at $LIB_DIR/heic-watch.sh"; (( problems++ ))
+  fi
+
+  if [[ -f "$CONFIG_FILE" ]]; then
+    local fmt; fmt="$(read_config_value FORMAT)"
+    case "$fmt" in
+      png|jpg|both) print -r -- "  [ok]   config format is '$fmt'" ;;
+      *) print -r -- "  [FAIL] config FORMAT is '$fmt' (expected png, jpg, or both)"; (( problems++ )) ;;
+    esac
+  else
+    print -r -- "  [FAIL] no config at $CONFIG_FILE"; (( problems++ ))
+  fi
+
+  if agent_loaded; then
+    print -r -- "  [ok]   launchd agent is loaded"
+  else
+    print -r -- "  [FAIL] launchd agent is not loaded — try: heic-converter install-agent"; (( problems++ ))
+  fi
+
+  if [[ -d "$dir" ]]; then
+    if /bin/ls "$dir" >/dev/null 2>&1; then
+      print -r -- "  [ok]   $dir is readable from this shell"
+    else
+      print -r -- "  [FAIL] cannot read $dir from this shell"; (( problems++ ))
+    fi
+  else
+    print -r -- "  [FAIL] watch folder $dir does not exist"; (( problems++ ))
+  fi
+
+  # Full Disk Access is granted to the *interpreter*, so this shell being able to
+  # read Downloads says nothing about whether launchd's zsh can. The log is the
+  # only honest signal, and only after something has actually been dropped in.
+  if [[ -s "$ERR_LOG" ]]; then
+    print -r -- ""
+    print -r -- "  Recent agent errors ($ERR_LOG):"
+    /usr/bin/tail -n 5 "$ERR_LOG" | /usr/bin/sed 's/^/    /'
+  fi
+
+  print -r -- ""
+  if (( problems == 0 )); then
+    print -r -- "No problems found."
+    print -r -- ""
+    print -r -- "If conversions still aren't happening, Full Disk Access is the usual"
+    print -r -- "cause. Grant it to /bin/zsh:  heic-converter grant-access"
+  else
+    print -r -- "$problems problem(s) found."
+    return 1
+  fi
+}
+
+cmd_grant_access() {
+  print -r -- "Opening System Settings → Privacy & Security → Full Disk Access."
+  print -r -- ""
+  print -r -- "Add /bin/zsh there (press Cmd+Shift+G in the file picker and type"
+  print -r -- "/bin/zsh), then switch it on. launchd runs the watcher via zsh, so"
+  print -r -- "the grant has to land on the interpreter — macOS offers no way to"
+  print -r -- "scope it to a single script."
+  /usr/bin/open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+}
+
+cmd_run() {
+  [[ -x "$LIB_DIR/heic-watch.sh" ]] || die "watcher not found at $LIB_DIR/heic-watch.sh"
+  /bin/zsh "$LIB_DIR/heic-watch.sh"
+  print -r -- "Pass complete. Recent log lines:"
+  [[ -f "$LOG_FILE" ]] && /usr/bin/tail -n 10 "$LOG_FILE" | /usr/bin/sed 's/^/  /'
+}
+
+cmd_logs() {
+  [[ -f "$LOG_FILE" ]] || die "no log yet at $LOG_FILE"
+  /usr/bin/tail -f "$LOG_FILE"
+}
+
+cmd_install_agent() {
+  [[ -x "$LIB_DIR/setup-agent.sh" ]] || die "setup-agent.sh not found in $LIB_DIR"
+  /bin/zsh "$LIB_DIR/setup-agent.sh"
+}
+
+cmd_uninstall() {
+  local assume_yes=0
+  [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]] && assume_yes=1
+
+  print -r -- "This will remove:"
+  print -r -- "  - the launchd agent ($LABEL)"
+  print -r -- "  - $PLIST"
+  print -r -- "  - $APP_SUPPORT (including your format setting)"
+  print -r -- "  - /usr/local/lib/heic-converter and /usr/local/bin/heic-converter"
+  print -r -- ""
+  print -r -- "Already-converted images are left alone."
+  print -r -- ""
+
+  if (( ! assume_yes )); then
+    local reply
+    read -r "reply?Continue? [y/N] "
+    [[ "$reply" == [yY]* ]] || { print -r -- "Cancelled."; return 0; }
+  fi
+
+  /bin/launchctl bootout "gui/$(/usr/bin/id -u)/${LABEL}" 2>/dev/null
+  /bin/rm -f "$PLIST"
+  /bin/rm -rf "$APP_SUPPORT"
+
+  # The system-wide half needs root. Only escalate if it's actually still there.
+  if [[ -e /usr/local/lib/heic-converter || -e /usr/local/bin/heic-converter ]]; then
+    print -r -- "Removing system files (requires your password)..."
+    /usr/bin/sudo /bin/rm -rf /usr/local/lib/heic-converter /usr/local/bin/heic-converter
+    /usr/bin/sudo /usr/sbin/pkgutil --forget is.bfc.heic-converter >/dev/null 2>&1
+  fi
+
+  print -r -- "Removed. The Full Disk Access grant for /bin/zsh was left in place —"
+  print -r -- "remove it yourself in System Settings if you no longer want it."
+}
+
+cmd_version() {
+  if [[ -f "$LIB_DIR/VERSION" ]]; then
+    /bin/cat "$LIB_DIR/VERSION"
+  elif [[ -f "${SELF_DIR:h}/VERSION" ]]; then
+    /bin/cat "${SELF_DIR:h}/VERSION"
+  else
+    print -r -- "unknown"
+  fi
+}
+
+cmd_help() {
+  /bin/cat <<'USAGE'
+heic-converter — control the HEIC watch-folder agent
+
+Usage: heic-converter <command> [argument]
+
+Commands:
+  format [png|jpg|both]   Show or set the output format. Takes effect on the
+                          next converted file — no reinstall needed.
+  quality [0-100]         Show or set JPEG quality.
+  status                  Show agent, config, and watch-folder state.
+  doctor                  Diagnose a watcher that isn't converting.
+  grant-access            Open the Full Disk Access pane in System Settings.
+  run                     Convert everything in the watch folder right now.
+  logs                    Follow the conversion log.
+  install-agent           (Re)create and load the launchd agent for this user.
+  uninstall [--yes]       Remove the agent, config, and installed files.
+  version                 Print the installed version.
+  help                    Show this message.
+USAGE
+}
+
+case "${1:-help}" in
+  format)         shift; cmd_format "${1:-}" ;;
+  quality)        shift; cmd_quality "${1:-}" ;;
+  status)         cmd_status ;;
+  doctor)         cmd_doctor ;;
+  grant-access)   cmd_grant_access ;;
+  run)            cmd_run ;;
+  logs)           cmd_logs ;;
+  install-agent)  cmd_install_agent ;;
+  uninstall)      shift; cmd_uninstall "${1:-}" ;;
+  version|--version|-V) cmd_version ;;
+  help|--help|-h) cmd_help ;;
+  *) print -r -- "unknown command: $1" >&2; print -r -- "" >&2; cmd_help >&2; exit 2 ;;
+esac

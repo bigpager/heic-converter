@@ -1,12 +1,16 @@
 #!/bin/zsh
-# Install.command — double-click entry point.
-# Shows a native macOS dialog to pick the output format, then runs install.sh.
+# Install.command — double-click entry point for running from a source checkout.
+#
+# For distribution, prefer the signed .pkg (`make pkg && make notarize`): it is
+# notarized *and stapled*, so it installs with no Gatekeeper warning and no
+# online check. This file is kept for the local dev loop, where it points the
+# agent at the scripts in this checkout so edits take effect immediately.
 
 cd "$(dirname "$0")"
 
 clear
 echo "═══════════════════════════════════════════════════"
-echo "  HEIC Converter — Installer"
+echo "  HEIC Converter — Installer (source checkout)"
 echo "═══════════════════════════════════════════════════"
 echo
 
@@ -38,17 +42,16 @@ echo "  2. Go to Privacy & Security → Full Disk Access"
 echo "  3. Click the '+' button"
 echo "  4. Press Cmd+Shift+G, type: /bin/zsh"
 echo "  5. Add it, then turn the toggle ON"
-echo "  6. Come back here and press Return to finish"
+echo
+echo "  Opening that pane for you now..."
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null
 echo
 read "?Press Return once you've done that... "
 
-LABEL="com.$(whoami).heicconverter"
-launchctl unload "$HOME/Library/LaunchAgents/${LABEL}.plist" 2>/dev/null || true
-launchctl load "$HOME/Library/LaunchAgents/${LABEL}.plist"
-
 echo
 echo "✅ All set. Drop a .heic file into Downloads to test it."
-echo "   (You can change the format later by editing:"
-echo "    ~/Library/Application Support/heic-converter/config.conf)"
+echo
+echo "   Change format later:  ./scripts/heic-converter format png"
+echo "   Troubleshoot:         ./scripts/heic-converter doctor"
 echo
 read "?Press Return to close this window... "

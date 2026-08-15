@@ -1,116 +1,155 @@
 # heic-converter
 
-A double-click macOS installer that watches `~/Downloads` and auto-converts `.heic` /
-`.HEIC` files to PNG, JPG, or both. Runs as a `launchd` `WatchPaths` agent (not an
-Automator Folder Action — those can silently miss AirDropped files that get written via
-a temp name and renamed).
+A signed, notarized macOS installer that watches `~/Downloads` and auto-converts
+`.heic` / `.HEIC` files to PNG, JPG, or both. Runs as a `launchd` `WatchPaths`
+agent (not an Automator Folder Action — those can silently miss AirDropped files
+that get written via a temp name and renamed).
+
+Conversion uses `sips`, the image tool built into macOS, so there are no
+dependencies to install and nothing leaves the machine.
+
+## Install
+
+Download `HEIC-Converter-<version>.pkg` from the releases and double-click it.
+
+Then grant Full Disk Access, which the installer cannot do for you:
+
+```bash
+heic-converter grant-access     # opens the right System Settings pane
+```
+
+Add `/bin/zsh` there and switch it on. Drop a `.heic` into Downloads to test.
+
+The grant has to go to `/bin/zsh` rather than to this tool, because that is the
+interpreter macOS sees running the watcher. It is the finest granularity this
+mechanism offers, and it is the one step Apple deliberately does not let an
+installer automate.
+
+## Usage
+
+The `.pkg` installs a `heic-converter` command:
+
+```bash
+heic-converter format both      # png | jpg | both — applies immediately
+heic-converter quality 90       # JPEG quality
+heic-converter status           # agent, config, watch folder
+heic-converter doctor           # diagnose "it isn't converting"
+heic-converter run              # convert everything in Downloads now
+heic-converter logs             # follow the conversion log
+heic-converter uninstall        # remove everything
+```
+
+Format changes take effect on the next converted file. `heic-watch.sh` re-reads
+its config on every run, so there is no reinstall and no logout.
 
 ## Layout
 
 ```
 heic-converter/
-├── Install.command          double-click entry point (native format-picker dialog)
+├── Install.command            double-click entry point for a source checkout (dev)
+├── VERSION                    single source of truth for the release version
+├── Makefile                   check / pkg / notarize / release
 ├── scripts/
-│   ├── install.sh            core installer (also runnable from CLI: --format png|jpg|both)
-│   ├── heic-watch.sh          the actual conversion logic, run by the launchd agent
-│   └── uninstall.sh           removes agent, script, and config
-├── config/
-│   └── config.conf.example    reference copy of the config install.sh generates
+│   ├── heic-converter          the installed CLI
+│   ├── heic-watch.sh           conversion logic, run by the launchd agent
+│   ├── install.sh              dev-mode install, straight from a checkout
+│   └── uninstall.sh            removes agent, files, and config
+├── packaging/
+│   ├── distribution.xml        productbuild definition
+│   ├── preinstall              stops the running agent before upgrade
+│   ├── postinstall             wires up the per-user agent after install
+│   ├── setup-agent.sh          the per-user setup itself (shared with the CLI)
+│   └── resources/              installer welcome + conclusion screens
 ├── build/
-│   └── sign-and-notarize.sh   codesign + notarytool submission (run locally, uses your keychain)
-└── README.md
+│   ├── build-pkg.sh            pkgbuild + productbuild + productsign
+│   └── notarize.sh             notarytool + stapler + verification
+├── config/config.conf.example  reference copy of the generated config
+└── docs/SIGNING.md             certificates, credentials, troubleshooting
 ```
 
-## How the format toggle works
+## How the install is put together
 
-`install.sh` (called either directly or via the `Install.command` dialog) writes the
-chosen format to:
+A `.pkg` runs as **root**, but the watcher has to run as **you** — it reads your
+`~/Downloads` and writes converted images next to the originals. So the install
+has two halves:
 
-```
-~/Library/Application Support/heic-converter/config.conf
-```
+- The **payload** is system-wide and inert: the watcher and CLI under
+  `/usr/local`.
+- The **`postinstall`** script figures out who actually double-clicked the
+  installer, then writes that user's config and LaunchAgent and loads it.
 
-`heic-watch.sh` (the script the launchd agent actually runs) sources this file fresh on
-every invocation. That means **switching PNG ⇄ JPG ⇄ Both later doesn't require
-reinstalling** — just edit `config.conf` and the next file dropped in Downloads uses the
-new setting. Re-running the installer (CLI or double-click) is just a convenience for
-resetting it via prompt instead of a text editor.
+`packaging/setup-agent.sh` does that second half, and is the same code
+`heic-converter install-agent` runs, so there is one implementation rather than
+two that can drift.
 
-## Quick start (dev loop, no signing)
+Installing also retires the pre-1.0 `com.$USER.heicconverter` agent if the
+machine has one, so an upgrade from the old `.command` installer doesn't leave
+two watchers running over the same folder. Your existing format setting is kept.
+
+## Building a release
 
 ```bash
-cd heic-converter
-chmod +x Install.command scripts/*.sh
-./scripts/install.sh --format both      # non-interactive, for iterating fast
-# or: ./Install.command                  # full GUI experience with the dialog
+make check      # syntax-check every script, validate the XML — runs anywhere
+make pkg        # build + sign
+make notarize   # submit to Apple, staple the ticket, verify
 ```
 
-Then grant Full Disk Access to `/bin/zsh` (System Settings → Privacy & Security → Full
-Disk Access) — this is the one step that can never be automated, by design on Apple's
-part, regardless of signing/notarization status.
+`make release` runs all three. Certificates and credentials are covered in
+[docs/SIGNING.md](docs/SIGNING.md) — the short version is that a `.pkg` needs a
+**Developer ID Installer** certificate, which is *not* the same as the Developer
+ID Application certificate used for signing binaries.
 
-Test:
+## Why a `.pkg`
+
+This started as a signed `.zip` of loose `.command` scripts. That works, but
+loose scripts **cannot be stapled**: Gatekeeper has to check with Apple online
+the first time they run, which needs a network and fails awkwardly without one.
+
+`stapler` only supports `.pkg`, `.app`, `.dmg`, and disk images. Packaging as a
+`.pkg` means the notarization ticket is embedded in the file itself, so it
+installs with no warning and no network round-trip — including on a Mac that has
+never encountered it. It also gets a real install receipt, a proper uninstall
+story, and an Installer UI that can explain the Full Disk Access step at the
+point the user needs it.
+
+## Dev loop, without signing
+
+```bash
+./scripts/install.sh --format both     # points the agent at this checkout
+./Install.command                      # same, with the format dialog
+```
+
+The agent runs `heic-watch.sh` from the checkout, so edits take effect on the
+next dropped file. Both use the same launchd label as the `.pkg`, so you can't
+accidentally end up with two watchers.
+
 ```bash
 tail -f ~/Library/Logs/heic-converter.log
 ```
-Drop a `.heic` in Downloads and watch for `OK (png): ...` / `OK (jpg): ...` lines.
-
-## Signing & notarization
-
-You mentioned you have a paid Apple Developer account — `build/sign-and-notarize.sh` is
-set up to use it, but **has not been run**, since it needs credentials that only exist on
-your actual machine (Keychain Access certs, `notarytool` stored credentials). One-time
-setup is documented at the top of that script. Once set up:
-
-```bash
-./build/sign-and-notarize.sh "Developer ID Application: Your Name (TEAMID)"
-```
-
-This signs `Install.command` and everything in `scripts/`, then submits the bundle to
-Apple's notary service. One caveat worth knowing going in: **loose scripts (`.command`
-files) can't be "stapled"** the way `.app` bundles or `.pkg` installers can — stapling
-embeds the notarization ticket directly in the file so Gatekeeper can verify it offline.
-A signed-but-unstapled script still avoids the scary "unidentified developer, no way to
-open it" dialog, but it does a quick online check with Apple on first launch instead
-(fast, automatic, no user action needed) — a meaningfully smoother experience than
-today's unsigned version, just not literally zero-friction.
-
-**Going further:** if you want a fully stapled, works-fully-offline artifact, the next
-step would be wrapping this as a `.pkg` installer (via `pkgbuild`) or a proper `.app`
-bundle instead of a bare `.command` file — both support stapling. Worth discussing with
-Claude Code if the friction from the online check ever actually matters in practice; for
-a personal/small-distribution tool it usually doesn't.
-
-## Distributing to someone else
-
-```bash
-cd build && ./sign-and-notarize.sh "Developer ID Application: ..."
-# produces dist/HEIC-Converter-Installer.zip, signed + notarized
-```
-
-Send them that zip. They: unzip → double-click `Install.command` → pick a format from
-the dialog → grant Full Disk Access when prompted → done.
 
 ## Uninstall
 
 ```bash
-./scripts/uninstall.sh
+heic-converter uninstall
 ```
 
-Removes the launchd agent, the installed script, and the config directory. Leaves any
-images already converted untouched, and leaves the Full Disk Access grant in place
-(remove that manually in System Settings if you want it gone too).
+Removes the agent, config, and installed files, and forgets the package
+receipt. Already-converted images are left alone, as is the Full Disk Access
+grant for `/bin/zsh` — remove that in System Settings if you want it gone.
 
-## Known constraints worth keeping in mind while iterating
+## Known constraints
 
-- `WatchPaths` fires on *any* filesystem change in Downloads, not just new HEICs — cheap
-  no-op for the script (it skips files with an existing matching output), but worth
-  knowing if you ever want to optimize.
-- Full Disk Access is granted to `/bin/zsh` itself, not to this specific script — that's
-  the coarsest-grained option available via this mechanism. A signed `.app` bundle could
-  instead request access scoped to itself, which is arguably a nicer permission story
-  long-term if this grows beyond a personal tool.
-- `sips`'s accepted values for JPEG `formatOptions` (quality) have varied across macOS
-  versions — some want `low`/`normal`/`high`/`best`, others `0-100`. If JPG conversion
-  ever starts failing after an OS update, check `~/Library/Logs/heic-converter.log` and
-  `/tmp/heicconverter.err.log` first.
+- `WatchPaths` fires on *any* change in Downloads, not just new HEICs. That's a
+  cheap no-op — the script skips files that already have a matching output.
+- Full Disk Access is granted to `/bin/zsh`, not to this tool specifically,
+  which means it applies to every zsh script you run. A signed `.app` bundle
+  could scope the grant to itself, which would be a better permission story if
+  this ever grows past a personal tool.
+- `sips`'s accepted values for JPEG `formatOptions` have varied across macOS
+  versions — some want `low`/`normal`/`high`/`best`, others `0-100`. If JPG
+  conversion starts failing after an OS update, check
+  `~/Library/Logs/heic-converter.log` first.
+- The `.pkg` can't show the format picker the `.command` dialog offered;
+  Installer has no equivalent, and an `osascript` prompt in a `postinstall`
+  turns a dismissed dialog into a failed install. The format defaults to `both`
+  and `heic-converter format` changes it in one command, without reinstalling.

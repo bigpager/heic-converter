@@ -1,8 +1,12 @@
 #!/bin/zsh
-# install.sh
-# Installs the HEIC watcher: copies heic-watch.sh to ~/bin, writes a config
-# file recording the chosen output format(s), generates + loads a launchd
-# agent scoped to this user's real $HOME/Downloads.
+# install.sh — install straight from a repo checkout, for the dev loop.
+#
+# This is the fast path for iterating: it points the launchd agent at the
+# heic-watch.sh *in this checkout*, so edits take effect on the next dropped
+# file with no reinstall step.
+#
+# For distribution, build the signed .pkg instead:
+#   make pkg && make notarize
 #
 # Usage:
 #   ./install.sh                 # interactive prompt for format
@@ -12,13 +16,14 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LABEL="com.$(whoami).heicconverter"
-BIN_PATH="$HOME/bin/heic-watch.sh"
+SCRIPT_DIR="${0:A:h}"
+LABEL="is.bfc.heic-converter"
 APP_SUPPORT="$HOME/Library/Application Support/heic-converter"
 CONFIG_FILE="$APP_SUPPORT/config.conf"
+LOG_DIR="$HOME/Library/Logs"
 PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
 WATCH_DIR="$HOME/Downloads"
+WATCHER="$SCRIPT_DIR/heic-watch.sh"
 
 FORMAT=""
 while [[ $# -gt 0 ]]; do
@@ -47,25 +52,31 @@ if [[ "$FORMAT" != "png" && "$FORMAT" != "jpg" && "$FORMAT" != "both" ]]; then
   exit 1
 fi
 
-echo "==> Installing HEIC converter for $(whoami)"
+echo "==> Installing HEIC converter (dev mode) for $(whoami)"
 echo "    Format:   $FORMAT"
 echo "    Watching: $WATCH_DIR"
+echo "    Watcher:  $WATCHER"
 echo
 
-mkdir -p "$HOME/bin"
-mkdir -p "$APP_SUPPORT"
-
-# --- Script ---
-cp "$SCRIPT_DIR/heic-watch.sh" "$BIN_PATH"
-chmod +x "$BIN_PATH"
+mkdir -p "$APP_SUPPORT" "$LOG_DIR" "$HOME/Library/LaunchAgents"
+chmod +x "$WATCHER"
 
 # --- Config ---
 cat > "$CONFIG_FILE" << CONF_EOF
-# heic-converter config — edit and re-run install.sh, or just edit this
-# and the next conversion will pick it up automatically (no reinstall needed).
+# heic-converter config — the watcher re-reads this on every run, so changes
+# take effect on the next converted file. No reinstall needed.
 FORMAT="$FORMAT"
 JPG_QUALITY="90"
 CONF_EOF
+
+# --- Retire the pre-1.0 per-user agent, if this machine has one ---
+LEGACY_LABEL="com.$(whoami).heicconverter"
+LEGACY_PLIST="$HOME/Library/LaunchAgents/${LEGACY_LABEL}.plist"
+if [[ -f "$LEGACY_PLIST" ]]; then
+  echo "==> Removing legacy agent $LEGACY_LABEL"
+  launchctl bootout "gui/$(id -u)/${LEGACY_LABEL}" 2>/dev/null || true
+  rm -f "$LEGACY_PLIST" "$HOME/bin/heic-watch.sh"
+fi
 
 # --- launchd plist ---
 cat > "$PLIST_PATH" << PLIST_EOF
@@ -79,28 +90,31 @@ cat > "$PLIST_PATH" << PLIST_EOF
     <key>ProgramArguments</key>
     <array>
         <string>/bin/zsh</string>
-        <string>-c</string>
-        <string>${BIN_PATH}</string>
+        <string>${WATCHER}</string>
     </array>
     <key>WatchPaths</key>
     <array>
         <string>${WATCH_DIR}</string>
     </array>
     <key>StandardOutPath</key>
-    <string>/tmp/heicconverter.out.log</string>
+    <string>${LOG_DIR}/heic-converter.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/heicconverter.err.log</string>
+    <string>${LOG_DIR}/heic-converter.err.log</string>
     <key>ThrottleInterval</key>
     <integer>2</integer>
 </dict>
 </plist>
 PLIST_EOF
 
-launchctl unload "$PLIST_PATH" 2>/dev/null || true
-launchctl load "$PLIST_PATH"
+plutil -lint "$PLIST_PATH" > /dev/null
+
+launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
 
 echo "==> Installed. Agent status:"
-launchctl list | grep "$LABEL" || echo "    (not showing yet — may need a moment)"
+launchctl print "gui/$(id -u)/${LABEL}" > /dev/null 2>&1 \
+  && echo "    loaded" \
+  || echo "    (not loaded yet — may need a moment)"
 echo
 echo "==> Config file (edit anytime, no reinstall needed):"
 echo "    $CONFIG_FILE"
