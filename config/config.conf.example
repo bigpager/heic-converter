@@ -1,0 +1,8 @@
+# Copy of what install.sh writes to:
+#   ~/Library/Application Support/heic-converter/config.conf
+#
+# Edit the live copy anytime — no reinstall or relaunch needed, the watcher
+# script reads this file fresh on every run.
+
+FORMAT="both"       # png | jpg | both
+JPG_QUALITY="90"    # 0-100 (sips formatOptions; accepted range varies by macOS version)
