@@ -29,21 +29,41 @@ installer automate.
 
 Defaults are **both** formats, **90%** JPEG quality, watching **`~/Downloads`**.
 
-For a native picker covering all three:
+To change them, open the settings window:
 
 ```bash
 heic-converter setup
 ```
 
-That asks for the format, then JPEG quality — only when JPG or Both is chosen,
-since it's meaningless for PNG — then opens a folder browser to pick what to
-watch. Your current values are preselected in each dialog, and cancelling any
-step leaves that setting alone.
+```
+┌─ heic-converter ─────────────────────────┐
+│                                          │
+│   Convert to PNG                  (  ●)  │
+│   Convert to JPG                  (  ●)  │
+│      Quality  [ 90 ] %                   │
+│   ────────────────────────────────────   │
+│   Watch folder                           │
+│   ~/Downloads                 [ Browse… ]│
+│                                          │
+│                              [   Done  ] │
+└──────────────────────────────────────────┘
+```
 
-Or set them individually:
+PNG and JPG are independent switches: either, both, or neither. Turning both off
+stores `FORMAT="none"` and pauses conversion — the agent stays installed and
+watching, it just stops producing output, and the window says so. The quality
+field greys out when JPG is off, since it means nothing for PNG. Changes apply
+as you make them; **Done** just closes the window.
+
+The window is built with AppKit via JavaScript for Automation, so it needs no
+compiled binary and no extra signing. On a machine where it can't start,
+`setup` falls back to sequential prompts automatically; `setup --dialogs`
+forces that mode, which is what you want over SSH.
+
+Or set everything individually:
 
 ```bash
-heic-converter format both              # png | jpg | both
+heic-converter format both              # png | jpg | both | none
 heic-converter quality 90               # 0-100
 heic-converter watch-folder ~/Pictures  # rebuilds the agent
 ```
@@ -83,6 +103,7 @@ heic-converter/
 │   ├── preinstall              stops the running agent before upgrade
 │   ├── postinstall             wires up the per-user agent after install
 │   ├── setup-agent.sh          the per-user setup itself (shared with the CLI)
+│   ├── settings-ui.js          the settings window (AppKit via JXA)
 │   └── resources/              installer welcome + conclusion screens
 ├── build/
 │   ├── build-pkg.sh            pkgbuild + productbuild + productsign
@@ -140,7 +161,7 @@ point the user needs it.
 
 ```bash
 ./scripts/install.sh --format both     # points the agent at this checkout
-./Install.command                      # same, with the format dialog
+./Install.command                      # same, then opens the settings window
 ```
 
 The agent runs `heic-watch.sh` from the checkout, so edits take effect on the

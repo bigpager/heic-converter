@@ -23,6 +23,8 @@ check:
 		zsh -n "$$f" || exit 1; \
 		echo "    ok  $$f"; \
 	done
+	@echo "==> Checking JavaScript syntax"
+	@node --check packaging/settings-ui.js && echo "    ok  packaging/settings-ui.js"
 	@echo "==> Validating XML"
 	@xmllint --noout packaging/distribution.xml && echo "    ok  packaging/distribution.xml"
 	@xmllint --noout --html packaging/resources/welcome.html 2>/dev/null \

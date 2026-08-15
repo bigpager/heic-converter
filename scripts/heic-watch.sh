@@ -23,6 +23,13 @@ else
   log "WARN: no config at $CONFIG_FILE, defaulting to format=$FORMAT"
 fi
 
+# Both output formats switched off — conversion is paused. Bail before the
+# per-file stability wait, and without logging: WatchPaths fires on every change
+# in the folder, so a message here would just flood the log.
+if [[ "$FORMAT" == "none" || -z "$FORMAT" ]]; then
+  exit 0
+fi
+
 # --- Wait for a file to stop growing (handles AirDrop/downloads in progress) ---
 wait_stable() {
   local f="$1"

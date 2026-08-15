@@ -4,9 +4,10 @@
 # The .command installer used a dialog to pick an output format at install time.
 # A .pkg can't show one — Installer offers no equivalent, and an osascript prompt
 # in a postinstall turns a dismissed dialog into a failed install — so the
-# settings live here instead. `heic-converter setup` presents the same native
-# dialogs (format, JPEG quality, watch folder) any time, and each is also
-# settable individually for scripting.
+# settings live here instead. `heic-converter setup` opens a real settings
+# window (packaging/settings-ui.js) with PNG/JPG toggles, a JPEG quality field,
+# and a folder browser; `--dialogs` falls back to sequential prompts for SSH.
+# Every setting is also individually scriptable.
 
 set -u
 
@@ -14,6 +15,9 @@ LABEL="is.bfc.heic-converter"
 
 # Installed layout, with a fallback so the CLI also works straight from a repo
 # checkout during development.
+# Resolved at top level on purpose: zsh sets $0 to the *function name* inside a
+# function, so reading it later would not give the path to this script.
+SELF="${0:A}"
 SELF_DIR="${0:A:h}"
 if [[ -x "/usr/local/lib/heic-converter/heic-watch.sh" ]]; then
   LIB_DIR="/usr/local/lib/heic-converter"
@@ -31,6 +35,14 @@ elif [[ -x "${SELF_DIR:h}/packaging/setup-agent.sh" ]]; then
   SETUP_AGENT="${SELF_DIR:h}/packaging/setup-agent.sh"
 else
   SETUP_AGENT="$LIB_DIR/setup-agent.sh"
+fi
+
+if [[ -f "$LIB_DIR/settings-ui.js" ]]; then
+  SETTINGS_UI="$LIB_DIR/settings-ui.js"
+elif [[ -f "${SELF_DIR:h}/packaging/settings-ui.js" ]]; then
+  SETTINGS_UI="${SELF_DIR:h}/packaging/settings-ui.js"
+else
+  SETTINGS_UI="$LIB_DIR/settings-ui.js"
 fi
 
 APP_SUPPORT="$HOME/Library/Application Support/heic-converter"
@@ -118,10 +130,15 @@ cmd_format() {
   fi
   case "$value" in
     png|jpg|both) ;;
-    *) die "invalid format: $value (expected png, jpg, or both)" ;;
+    none) ;;
+    *) die "invalid format: $value (expected png, jpg, both, or none)" ;;
   esac
   set_config_value FORMAT "$value"
-  print -r -- "format set to $value (applies to the next file converted)"
+  if [[ "$value" == "none" ]]; then
+    print -r -- "both outputs off — conversion is paused (the agent stays installed)"
+  else
+    print -r -- "format set to $value (applies to the next file converted)"
+  fi
 }
 
 cmd_quality() {
@@ -233,6 +250,41 @@ cmd_setup() {
   require_gui
   require_config
 
+  if [[ "${1:-}" == "--dialogs" ]]; then
+    cmd_setup_dialogs
+    return $?
+  fi
+
+  [[ -f "$SETTINGS_UI" ]] || { cmd_setup_dialogs; return $?; }
+
+  # The settings window drives AppKit through JXA's ObjC bridge. If that fails
+  # on some macOS revision, fall back to the plain dialog chain rather than
+  # leaving the user with no way to change settings.
+  if ! /usr/bin/osascript -l JavaScript "$SETTINGS_UI" "$SELF"; then
+    print -r -- "Settings window failed to open; falling back to dialogs." >&2
+    cmd_setup_dialogs
+    return $?
+  fi
+
+  print_settings
+}
+
+print_settings() {
+  local fmt; fmt="$(read_config_value FORMAT)"
+  print -r -- "Settings:"
+  if [[ "$fmt" == "none" ]]; then
+    print -r -- "  format:   none (conversion paused)"
+  else
+    print -r -- "  format:   $fmt"
+  fi
+  [[ "$fmt" == "jpg" || "$fmt" == "both" ]] \
+    && print -r -- "  quality:  $(read_config_value JPG_QUALITY)"
+  print -r -- "  watching: $(watch_dir)"
+}
+
+# Sequential dialogs — the fallback when the settings window can't run, and
+# usable over SSH where a window would be pointless.
+cmd_setup_dialogs() {
   local fmt quality folder
 
   case "$(ask_format)" in
@@ -264,11 +316,7 @@ cmd_setup() {
   rebuild_agent
 
   print -r -- ""
-  print -r -- "Settings:"
-  print -r -- "  format:   $(read_config_value FORMAT)"
-  [[ "$(read_config_value FORMAT)" != "png" ]] \
-    && print -r -- "  quality:  $(read_config_value JPG_QUALITY)"
-  print -r -- "  watching: $(watch_dir)"
+  print_settings
 }
 
 # --- Status and diagnostics --------------------------------------------------
@@ -312,7 +360,8 @@ cmd_doctor() {
     local fmt; fmt="$(read_config_value FORMAT)"
     case "$fmt" in
       png|jpg|both) print -r -- "  [ok]   config format is '$fmt'" ;;
-      *) print -r -- "  [FAIL] config FORMAT is '$fmt' (expected png, jpg, or both)"; (( problems++ )) ;;
+      none) print -r -- "  [ok]   conversion is paused (both outputs off)" ;;
+      *) print -r -- "  [FAIL] config FORMAT is '$fmt' (expected png, jpg, both, or none)"; (( problems++ )) ;;
     esac
   else
     print -r -- "  [FAIL] no config at $CONFIG_FILE"; (( problems++ ))
@@ -439,9 +488,12 @@ heic-converter — control the HEIC watch-folder agent
 Usage: heic-converter <command> [argument]
 
 Settings:
-  setup                   Native dialogs for format, JPEG quality, and which
-                          folder to watch.
-  format [png|jpg|both]   Show or set the output format. Takes effect on the
+  setup [--dialogs]       Open the settings window: PNG/JPG toggles, JPEG
+                          quality, and the watched folder. --dialogs uses
+                          plain prompts instead (works over SSH).
+  format [png|jpg|both|none]
+                          Show or set the output format; none pauses
+                          conversion. Takes effect on the
                           next converted file — no reinstall needed.
   quality [0-100]         Show or set JPEG quality (default 90).
   watch-folder [path]     Show or set the watched folder (default ~/Downloads).
@@ -463,7 +515,7 @@ USAGE
 }
 
 case "${1:-help}" in
-  setup)          cmd_setup ;;
+  setup)          shift; cmd_setup "${1:-}" ;;
   format)         shift; cmd_format "${1:-}" ;;
   quality)        shift; cmd_quality "${1:-}" ;;
   watch-folder)   shift; cmd_watch_folder "${1:-}" ;;

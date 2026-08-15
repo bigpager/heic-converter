@@ -111,7 +111,7 @@ else
 #
 # Or run `heic-converter setup` for all three with a native picker.
 
-FORMAT="both"        # png | jpg | both
+FORMAT="both"        # png | jpg | both | none ("none" pauses conversion)
 JPG_QUALITY="90"     # 0-100 (passed to sips formatOptions)
 CONF
   log "wrote default config to $CONFIG_FILE"

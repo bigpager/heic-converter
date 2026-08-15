@@ -68,13 +68,15 @@ step "Staging payload (version $VERSION)"
 
 /bin/cp "$PROJECT_DIR/scripts/heic-watch.sh"      "$WORK/payload/usr/local/lib/heic-converter/"
 /bin/cp "$PROJECT_DIR/packaging/setup-agent.sh"   "$WORK/payload/usr/local/lib/heic-converter/"
+/bin/cp "$PROJECT_DIR/packaging/settings-ui.js"   "$WORK/payload/usr/local/lib/heic-converter/"
 /bin/cp "$PROJECT_DIR/VERSION"                    "$WORK/payload/usr/local/lib/heic-converter/"
 /bin/cp "$PROJECT_DIR/scripts/heic-converter"     "$WORK/payload/usr/local/bin/"
 
 /bin/chmod 755 "$WORK/payload/usr/local/lib/heic-converter/heic-watch.sh" \
                "$WORK/payload/usr/local/lib/heic-converter/setup-agent.sh" \
                "$WORK/payload/usr/local/bin/heic-converter"
-/bin/chmod 644 "$WORK/payload/usr/local/lib/heic-converter/VERSION"
+/bin/chmod 644 "$WORK/payload/usr/local/lib/heic-converter/VERSION" \
+               "$WORK/payload/usr/local/lib/heic-converter/settings-ui.js"
 
 /bin/cp "$PROJECT_DIR/packaging/preinstall"  "$WORK/scripts/"
 /bin/cp "$PROJECT_DIR/packaging/postinstall" "$WORK/scripts/"
