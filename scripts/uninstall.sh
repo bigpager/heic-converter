@@ -24,9 +24,11 @@ rm -f "$LEGACY_PLIST" "$LEGACY_BIN"
 rm -rf "$APP_SUPPORT"
 
 # Installed by the .pkg, so removing it needs root — only ask if it's there.
-if [[ -e /usr/local/lib/heic-converter || -e /usr/local/bin/heic-converter ]]; then
+if [[ -e /usr/local/lib/heic-converter || -e /usr/local/bin/heic-converter \
+      || -e "/Applications/HEIC Converter.app" ]]; then
   echo "==> Removing system files (requires your password)"
-  sudo rm -rf /usr/local/lib/heic-converter /usr/local/bin/heic-converter
+  sudo rm -rf /usr/local/lib/heic-converter /usr/local/bin/heic-converter \
+              "/Applications/HEIC Converter.app"
   sudo pkgutil --forget is.bfc.heic-converter > /dev/null 2>&1 || true
 fi
 

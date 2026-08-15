@@ -446,6 +446,7 @@ cmd_uninstall() {
   print -r -- "  - $PLIST"
   print -r -- "  - $APP_SUPPORT (including your settings)"
   print -r -- "  - /usr/local/lib/heic-converter and /usr/local/bin/heic-converter"
+  print -r -- "  - /Applications/HEIC Converter.app"
   print -r -- ""
   print -r -- "Already-converted images are left alone."
   print -r -- ""
@@ -461,9 +462,11 @@ cmd_uninstall() {
   /bin/rm -rf "$APP_SUPPORT"
 
   # The system-wide half needs root. Only escalate if it's actually still there.
-  if [[ -e /usr/local/lib/heic-converter || -e /usr/local/bin/heic-converter ]]; then
+  if [[ -e /usr/local/lib/heic-converter || -e /usr/local/bin/heic-converter \
+        || -e "/Applications/HEIC Converter.app" ]]; then
     print -r -- "Removing system files (requires your password)..."
-    /usr/bin/sudo /bin/rm -rf /usr/local/lib/heic-converter /usr/local/bin/heic-converter
+    /usr/bin/sudo /bin/rm -rf /usr/local/lib/heic-converter /usr/local/bin/heic-converter \
+                              "/Applications/HEIC Converter.app"
     /usr/bin/sudo /usr/sbin/pkgutil --forget is.bfc.heic-converter >/dev/null 2>&1
   fi
 

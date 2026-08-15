@@ -5,8 +5,8 @@
 
 <p><strong>Almost done &mdash; one manual step remains.</strong></p>
 
-<p>macOS will not let a background task read your Downloads folder until you say so,
-and Apple provides no way for an installer to request this for you.</p>
+<p>macOS will not let a background task read your Downloads folder until you say
+so, and Apple provides no way for an installer to request this for you.</p>
 
 <p><strong>Grant Full Disk Access</strong></p>
 <ol>
@@ -17,38 +17,27 @@ and Apple provides no way for an installer to request this for you.</p>
   <li>Add it, then switch it <strong>on</strong></li>
 </ol>
 
-<p>Or just run <code>heic-converter grant-access</code> in Terminal, which opens that
-pane directly.</p>
-
 <p>The permission has to go to <code>/bin/zsh</code> rather than to this tool
-specifically, because that is the interpreter macOS sees running the watcher. That is
-the finest granularity this mechanism allows.</p>
+specifically, because that is the interpreter macOS sees running the watcher.
+That is the finest granularity this mechanism allows.</p>
 
-<p><strong>Then try it:</strong> drop a <code>.heic</code> file into Downloads.
-A converted copy should appear within a couple of seconds.</p>
+<p><em>Watching a folder outside Downloads, Desktop, or Documents &mdash; say
+<code>~/Pictures/Incoming</code> &mdash; needs no permission at all, because
+those locations aren&rsquo;t protected.</em></p>
 
-<p><strong>Choosing settings</strong></p>
+<p><strong>Changing settings</strong></p>
+
+<p>A <strong>HEIC Converter</strong> app has been added to your Applications
+folder. Open it any time to switch PNG and JPG on or off, set JPEG quality, or
+browse to a different folder to watch. It should have opened already.</p>
 
 <p>Out of the box this converts to <strong>both</strong> PNG and JPG at
-<strong>90%</strong> quality, watching your <strong>Downloads</strong> folder. To
-change any of that with a native picker, run:</p>
+<strong>90%</strong> quality, watching your <strong>Downloads</strong> folder.
+Changes apply immediately &mdash; there is nothing to restart and no need to
+reinstall.</p>
 
-<p><code>heic-converter setup</code></p>
-
-<p>It asks for the output format, then JPEG quality (only if you picked JPG or
-Both), then lets you browse to a different folder to watch.</p>
-
-<p><strong>Useful commands</strong></p>
-<ul>
-  <li><code>heic-converter setup</code> &mdash; format, quality, and watch folder</li>
-  <li><code>heic-converter format both</code> &mdash; switch between png, jpg, or both
-      (takes effect immediately, no reinstall)</li>
-  <li><code>heic-converter quality 90</code> &mdash; JPEG quality, 0&ndash;100</li>
-  <li><code>heic-converter watch-folder ~/Pictures</code> &mdash; watch somewhere else</li>
-  <li><code>heic-converter doctor</code> &mdash; diagnose it if nothing is converting</li>
-  <li><code>heic-converter run</code> &mdash; convert everything already in the folder</li>
-  <li><code>heic-converter uninstall</code> &mdash; remove it completely</li>
-</ul>
+<p><strong>Then try it:</strong> drop a <code>.heic</code> file into the watched
+folder. A converted copy should appear within a couple of seconds.</p>
 
 </body>
 </html>

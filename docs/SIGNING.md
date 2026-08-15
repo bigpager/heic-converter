@@ -2,30 +2,39 @@
 
 One-time setup, then two commands per release.
 
-## What you need, and what you don't
+## What you need
 
-A `.pkg` is signed with a **Developer ID Installer** certificate. That is a
-*different certificate* from the **Developer ID Application** one, which signs
-executables.
+**Two different Developer ID certificates**, which are not interchangeable:
 
-This project's payload is entirely shell scripts. There is no Mach-O code in it,
-so there is nothing for a Developer ID Application certificate to sign, and it
-plays no part in the build. If you set one up for the earlier `.zip`-based
-flow, it is simply unused now.
+| Certificate | Signs | Tool |
+|---|---|---|
+| Developer ID **Application** | `HEIC Converter.app` | `codesign` |
+| Developer ID **Installer** | the `.pkg` itself | `productsign` |
+
+Most of the payload is shell scripts, which are not code as far as signing is
+concerned. The exception is `HEIC Converter.app`: `osacompile` builds it around
+an Apple applet stub, and that stub is a Mach-O binary, so it needs the
+Application certificate and a hardened runtime before Apple will notarize the
+package containing it.
+
+If you set up an Application certificate for the earlier `.zip`-based flow, it
+is still the right one — you just need the Installer certificate as well.
 
 You need, once:
 
-1. A Developer ID Installer certificate in your keychain.
-2. Notarization credentials stored under a keychain profile.
+1. A Developer ID Application certificate in your keychain.
+2. A Developer ID Installer certificate in your keychain.
+3. Notarization credentials stored under a keychain profile.
 
-Both require a paid Apple Developer Program membership.
+All require a paid Apple Developer Program membership.
 
-## 1. Developer ID Installer certificate
+## 1. The two Developer ID certificates
 
 Easiest path, via Xcode:
 
 - **Xcode → Settings → Accounts**
 - select your team → **Manage Certificates…**
+- **+** → **Developer ID Application**
 - **+** → **Developer ID Installer**
 
 Or through the portal, if you'd rather not install Xcode:
@@ -33,20 +42,21 @@ Or through the portal, if you'd rather not install Xcode:
 - Keychain Access → **Certificate Assistant → Request a Certificate From a
   Certificate Authority**, save the CSR to disk
 - <https://developer.apple.com/account/resources/certificates> → **+** →
-  **Developer ID Installer** → upload the CSR
+  **Developer ID Application** → upload the CSR, then repeat for
+  **Developer ID Installer**
 - download the resulting `.cer` and double-click to add it to your keychain
 
 Creating Developer ID certificates requires the **Account Holder** role. If the
 option is greyed out, that's why.
 
-Confirm it landed:
+Confirm both landed:
 
 ```bash
-security find-identity -v | grep "Developer ID Installer"
+security find-identity -v | grep "Developer ID"
 ```
 
-`build-pkg.sh` runs this itself and picks the certificate up automatically, so
-you only need `--identity` if you hold more than one.
+You want one line for each. `build-pkg.sh` finds them itself, so you only need
+`--identity` / `--app-identity` if you hold more than one of a kind.
 
 ## 2. Notarization credentials
 
@@ -151,7 +161,15 @@ ideally with the network off, which is the case stapling exists to handle.
 ## Troubleshooting
 
 **`no 'Developer ID Installer' certificate found`** — you likely have the
-*Application* certificate only. They are not interchangeable; see step 1.
+*Application* certificate only. You need both; see step 1.
+
+**`The binary is not signed with a valid Developer ID certificate`** during
+notarization — this refers to `HEIC Converter.app`. Check that the app was
+signed with the *Application* certificate and with `--options runtime`:
+
+```bash
+codesign -dvvv --entitlements - "/Applications/HEIC Converter.app"
+```
 
 **`store-credentials` fails with `HTTP status code: 401. Invalid credentials`**
 — authentication was rejected outright, so the Team ID is not the problem (a

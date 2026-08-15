@@ -11,29 +11,25 @@ dependencies to install and nothing leaves the machine.
 ## Install
 
 Download `HEIC-Converter-<version>.pkg` from the releases and double-click it.
+No Terminal required: the installer sets everything up, adds a **HEIC
+Converter** app to your Applications folder, and opens it so you can choose
+settings.
 
-Then grant Full Disk Access, which the installer cannot do for you:
+The one step that can't be automated is granting **Full Disk Access** — Apple
+deliberately gives installers no way to request it. System Settings → Privacy &
+Security → Full Disk Access → **+** → Cmd-Shift-G → `/bin/zsh` → switch it on.
 
-```bash
-heic-converter grant-access     # opens the right System Settings pane
-```
-
-Add `/bin/zsh` there and switch it on. Drop a `.heic` into Downloads to test.
-
-The grant has to go to `/bin/zsh` rather than to this tool, because that is the
-interpreter macOS sees running the watcher. It is the finest granularity this
-mechanism offers, and it is the one step Apple deliberately does not let an
-installer automate.
+The grant goes to `/bin/zsh` rather than to this tool because that's the
+interpreter macOS sees running the watcher; it's the finest granularity this
+mechanism offers. Watching a folder *outside* Downloads, Desktop, and Documents
+needs no permission at all, since only those are TCC-protected.
 
 ## Settings
 
 Defaults are **both** formats, **90%** JPEG quality, watching **`~/Downloads`**.
 
-To change them, open the settings window:
-
-```bash
-heic-converter setup
-```
+Open **HEIC Converter** from your Applications folder to change them (or run
+`heic-converter setup` from a shell — same window):
 
 ```
 ┌─ heic-converter ─────────────────────────┐
@@ -99,6 +95,7 @@ heic-converter/
 │   ├── install.sh              dev-mode install, straight from a checkout
 │   └── uninstall.sh            removes agent, files, and config
 ├── packaging/
+│   ├── app-launcher.applescript  source for HEIC Converter.app
 │   ├── distribution.xml        productbuild definition
 │   ├── preinstall              stops the running agent before upgrade
 │   ├── postinstall             wires up the per-user agent after install
@@ -119,7 +116,7 @@ A `.pkg` runs as **root**, but the watcher has to run as **you** — it reads yo
 has two halves:
 
 - The **payload** is system-wide and inert: the watcher and CLI under
-  `/usr/local`.
+  `/usr/local`, plus `HEIC Converter.app` in `/Applications`.
 - The **`postinstall`** script figures out who actually double-clicked the
   installer, then writes that user's config and LaunchAgent and loads it.
 

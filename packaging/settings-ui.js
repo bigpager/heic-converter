@@ -18,6 +18,9 @@
 ObjC.import('Cocoa');
 
 function run(argv) {
+  // Launched from the .app there are no arguments, so fall back to the
+  // installed location rather than dereferencing undefined.
+  argv = argv || [];
   var CLI = argv[0] || '/usr/local/bin/heic-converter';
 
   var app = Application.currentApplication();
@@ -231,5 +234,11 @@ function run(argv) {
   win.center;
   win.makeKeyAndOrderFront(null);
   nsapp.activateIgnoringOtherApps(true);
-  nsapp.run;
+
+  // Only start a run loop if nothing else already has one. Under plain
+  // osascript there is none; if this is ever hosted somewhere that already
+  // runs NSApplication, calling run again would deadlock.
+  if (!nsapp.isRunning) {
+    nsapp.run;
+  }
 }

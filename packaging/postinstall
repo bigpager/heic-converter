@@ -12,6 +12,7 @@
 set -u
 
 LIB_DIR="/usr/local/lib/heic-converter"
+SETTINGS_APP="/Applications/HEIC Converter.app"
 TARGET_VOLUME="${3:-/}"
 
 log() { print -r -- "[heic-converter postinstall] $*"; }
@@ -34,6 +35,16 @@ fi
 # and install-agent can always finish the job afterwards.
 if ! /bin/zsh "$LIB_DIR/setup-agent.sh" "$CONSOLE_USER"; then
   log "agent setup did not complete; run 'heic-converter install-agent' to retry"
+fi
+
+# Open the settings app as the installing user, so a double-click install lands
+# them somewhere they can pick a format and folder without opening a terminal.
+# Backgrounded and ignored on failure: this is a nicety, and a hung or missing
+# GUI must never turn a good install into a failed one.
+CONSOLE_UID="$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null)"
+if [[ -n "$CONSOLE_UID" && -d "$SETTINGS_APP" ]]; then
+  /bin/launchctl asuser "$CONSOLE_UID" \
+    /usr/bin/open -a "$SETTINGS_APP" >/dev/null 2>&1 &
 fi
 
 exit 0
