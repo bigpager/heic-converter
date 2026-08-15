@@ -141,9 +141,39 @@ make notarize   # submit to Apple, staple the ticket, verify
 ```
 
 `make release` runs all three. Certificates and credentials are covered in
-[docs/SIGNING.md](docs/SIGNING.md) — the short version is that a `.pkg` needs a
-**Developer ID Installer** certificate, which is *not* the same as the Developer
-ID Application certificate used for signing binaries.
+[docs/SIGNING.md](docs/SIGNING.md) — the short version is that this needs **two**
+Developer ID certificates, Application for the app and Installer for the `.pkg`.
+
+## Publishing a release
+
+The signed, stapled `.pkg` lands in `dist/`, which is gitignored — it is a build
+output, not source. Publishing it means attaching it to a GitHub Release:
+
+```bash
+# 1. Bump VERSION, commit, and build
+make release
+
+# 2. Tag the exact commit the artifact was built from
+git tag -a v$(cat VERSION) -m "v$(cat VERSION)"
+git push origin v$(cat VERSION)
+
+# 3. Create the release and attach the package
+gh release create v$(cat VERSION) \
+  "dist/HEIC-Converter-$(cat VERSION).pkg" \
+  --title "v$(cat VERSION)" \
+  --notes "Signed and notarized installer for macOS 12 or later."
+```
+
+Without the `gh` CLI, create the release at
+`https://github.com/bigpager/heic-converter/releases/new`, pick the tag, and
+drag the `.pkg` into the attachments box.
+
+Tag the commit the artifact was actually built from. A tag pointing somewhere
+else makes it impossible to tell later which source produced a shipped, signed
+binary — and the signature means you cannot just rebuild and compare.
+
+The version in `VERSION` ends up in the package identifier, the filename, and
+`heic-converter version`, so bump it before building rather than after.
 
 ## Why a `.pkg`
 
