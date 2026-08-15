@@ -50,21 +50,50 @@ you only need `--identity` if you hold more than one.
 
 ## 2. Notarization credentials
 
-Create an app-specific password at <https://appleid.apple.com> (Sign-In and
-Security → App-Specific Passwords) — your normal Apple ID password will not
-work — then store it once:
+Two ways to authenticate. Either one gets stored under a keychain profile, and
+`notarize.sh` only ever references the profile name — never the credentials
+themselves — so the choice is invisible to the rest of the build.
+
+The profile name `heic-converter-notary` is what `notarize.sh` expects; pass
+`--profile` if you name it something else.
+
+### Option A: App Store Connect API key (recommended)
+
+Not tied to anyone's personal Apple ID, unaffected by password changes, and the
+only workable option if signing ever moves to CI.
+
+1. App Store Connect → **Users and Access → Integrations → App Store Connect
+   API**
+2. Create a **Team key** with the **Developer** role
+3. Download the `.p8`. **You get exactly one chance** — Apple will not let you
+   re-download it. Keep it somewhere safe and out of git.
+4. Note the **Key ID** and the **Issuer ID** from that page
+
+```bash
+xcrun notarytool store-credentials "heic-converter-notary" \
+  --key ~/private_keys/AuthKey_XXXXXXXXXX.p8 \
+  --key-id XXXXXXXXXX \
+  --issuer aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+```
+
+### Option B: Apple ID and app-specific password
+
+Fine for signing from one personal Mac. Create the password at
+<https://appleid.apple.com> → **Sign-In and Security → App-Specific
+Passwords**. Your normal Apple ID password will not work, and neither will a
+2FA code.
 
 ```bash
 xcrun notarytool store-credentials "heic-converter-notary" \
   --apple-id "you@example.com" \
-  --team-id "YOURTEAMID" \
-  --password "xxxx-xxxx-xxxx-xxxx"
+  --team-id "YOURTEAMID"
 ```
 
-The profile name `heic-converter-notary` is what `notarize.sh` expects; pass
-`--profile` if you name it something else. Your Team ID is the parenthesised
-code in the certificate name, and is listed at
-<https://developer.apple.com/account> under Membership.
+Omitting `--password` makes it prompt, which avoids shell quoting problems and
+trailing whitespace pasted in from the clipboard.
+
+Your Team ID is the parenthesised code in the certificate name, and is listed
+at <https://developer.apple.com/account> under Membership.
 
 ## Building a release
 
@@ -123,6 +152,26 @@ ideally with the network off, which is the case stapling exists to handle.
 
 **`no 'Developer ID Installer' certificate found`** — you likely have the
 *Application* certificate only. They are not interchangeable; see step 1.
+
+**`store-credentials` fails with `HTTP status code: 401. Invalid credentials`**
+— authentication was rejected outright, so the Team ID is not the problem (a
+team mismatch reports something else). In rough order of likelihood:
+
+- A **2FA code was used instead of an app-specific password**. They look
+  nothing alike: a 2FA code is 6 digits and expires in seconds, an app-specific
+  password is 16 lowercase letters as four hyphenated groups
+  (`abcd-efgh-ijkl-mnop`) and does not expire. Keep the hyphens.
+- **Apple ID mismatch.** An app-specific password only works for the exact
+  Apple ID that created it. Generating it under a personal Apple ID while
+  passing the developer one to `--apple-id` produces this error.
+- **The Apple ID password was changed recently**, which silently revokes every
+  app-specific password. Generate a new one.
+- **It's a Managed Apple ID** (Apple Business/School Manager). Those cannot
+  create app-specific passwords at all — use the API key instead.
+- **Clipboard whitespace or shell quoting.** Omit `--password` and let it
+  prompt.
+
+Switching to the API key in Option A sidesteps this whole category.
 
 **Notarization status `Invalid`** — `notarize.sh` fetches the detailed log
 automatically. Manually:

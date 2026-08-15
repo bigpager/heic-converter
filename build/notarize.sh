@@ -5,10 +5,16 @@
 #   ./build/notarize.sh dist/HEIC-Converter-1.0.0.pkg
 #   ./build/notarize.sh --profile my-profile
 #
-# One-time credential setup (see docs/SIGNING.md):
+# One-time credential setup — either form works, this script only ever names the
+# profile. Full walkthrough in docs/SIGNING.md.
+#
+#   # App Store Connect API key (recommended):
 #   xcrun notarytool store-credentials "heic-converter-notary" \
-#     --apple-id "you@example.com" --team-id "YOURTEAMID" \
-#     --password "app-specific-password"
+#     --key AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --issuer <issuer-uuid>
+#
+#   # or Apple ID + app-specific password (not a 2FA code):
+#   xcrun notarytool store-credentials "heic-converter-notary" \
+#     --apple-id "you@example.com" --team-id "YOURTEAMID"
 #
 # Stapling is the reason this project moved from a signed .zip to a .pkg. A
 # loose .command file can be notarized but not stapled, so Gatekeeper has to
